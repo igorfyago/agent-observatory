@@ -138,8 +138,7 @@
     <div id="messages">
       <div class="bubble">
         <div class="who"><span class="dot"></span>observatory</div>
-        Ask the team something — the pipeline on the right lights up live as each agent works.
-        Runs keyless in demo mode; add an <b>OPENAI_API_KEY</b> to <b>.env</b> for real inference.
+        <span id="welcomeTxt">Ask the team something — the pipeline on the right lights up live as each agent works.</span>
       </div>
     </div>
     <div id="composer">
@@ -224,6 +223,13 @@ function setMode(m) {
   if (m.llm === "demo") { c.textContent = "DEMO MODE"; c.className = "chip warn"; }
   else { c.textContent = "LIVE · OPENAI"; c.className = "chip on"; }
   $("#chipLs").className = "chip" + (m.langsmith ? " on" : "");
+  $("#welcomeTxt").innerHTML = m.llm === "demo"
+    ? "Ask the team something — the pipeline on the right lights up live as each agent " +
+      "works. Demo mode: scripted output, no key needed. Set <b>OPENAI_API_KEY</b> in " +
+      "<b>.env</b> for real inference."
+    : "Ask the team anything. Five live agents — Supervisor, Researcher, Analyst, Writer, " +
+      "Critic — plan, work in parallel, debate and revise in real time; watch the " +
+      "pipeline on the right light up as each one thinks.";
 }
 
 /* ---- UI state transitions ---- */
