@@ -1,8 +1,11 @@
 """Multi-agent research pipeline on LangGraph.
 
-Every node emits live events (node_start / token / node_end / route) through an
-`emit` callback passed in via config — the FastAPI layer streams these to the
-browser as SSE so the UI can illuminate the graph in real time.
+One of the hosted agents (registry id "pipeline"). Node start/end, model tokens
+and tool calls are derived generically by backend/runner.py from astream_events,
+so this module carries no observability boilerplate. The two frames the runner
+cannot infer, the demo mode's canned tokens and the critic's explicit routing
+decision, are dispatched as LangChain custom events named "obs" and pass
+straight through to the browser.
 
 Runs in two modes:
   - DEMO  (no OPENAI_API_KEY): canned role-scripts streamed word-by-word,
@@ -18,6 +21,7 @@ import asyncio
 import os
 from typing import TypedDict
 
+from langchain_core.callbacks.manager import adispatch_custom_event
 from langgraph.graph import StateGraph, START, END
 
 
@@ -36,7 +40,7 @@ class PipelineState(TypedDict, total=False):
     revisions: int
 
 
-# Graph spec the frontend renders — kept next to the graph so they can't drift.
+# Graph spec the frontend renders, kept next to the graph so they can't drift.
 GRAPH_SPEC = {
     "nodes": [
         {"id": "supervisor", "label": "Supervisor", "role": "plans & delegates"},
@@ -81,7 +85,7 @@ DEMO_SCRIPTS = {
     "researcher": (
         "Collecting the facts. Key findings: the core framework exposes a graph "
         "API with explicit state, checkpointing gives durable conversations and "
-        "time travel, and streaming events are first-class — every node emits "
+        "time travel, and streaming events are first-class, every node emits "
         "start, token, and end signals we can observe. Ecosystem docs confirm "
         "human-in-the-loop interrupts and a CLI for local dev and deployment. "
         "Evidence quality: high, sourced from primary documentation."
@@ -98,7 +102,7 @@ DEMO_SCRIPTS = {
         "Drafting the answer. Combining the Researcher's evidence with the "
         "Analyst's verdict: adopt the graph-based architecture for multi-agent "
         "pipelines. It gives explicit, testable control flow, durable state via "
-        "checkpointing, and native streaming that powers live observability — "
+        "checkpointing, and native streaming that powers live observability, "
         "exactly the properties needed for production agents. Reserve simple "
         "prompt loops for one-shot tasks where a graph adds ceremony without value."
     ),
@@ -120,11 +124,11 @@ DEMO_SCRIPTS = {
     "critic-approve": (
         "Re-reviewing. The revision leads with the recommendation, grounds it in "
         "the collected evidence, and ends with a concrete, scoped first action. "
-        "Quality gate passed — approving for delivery."
+        "Quality gate passed, approving for delivery."
     ),
 }
 
-DEMO_TOKEN_DELAY = 0.035  # seconds per word — tuned so the UI reads well
+DEMO_TOKEN_DELAY = 0.035  # seconds per word, tuned so the UI reads well
 
 
 # --------------------------------------------------------------------------- #
@@ -162,8 +166,14 @@ async def speak(node: str, prompt: str, script_key: str, emit) -> str:
     return await _stream_demo(node, script_key, emit)
 
 
+async def _emit(ev: dict) -> None:
+    """Push a frame the generic runner cannot derive on its own (demo tokens,
+    routing decisions). astream_events surfaces these as on_custom_event."""
+    await adispatch_custom_event("obs", ev)
+
+
 def _emit_of(config) -> callable:
-    return config["configurable"]["emit"]
+    return _emit
 
 
 # --------------------------------------------------------------------------- #
@@ -172,44 +182,37 @@ def _emit_of(config) -> callable:
 
 async def supervisor(state: PipelineState, config) -> PipelineState:
     emit = _emit_of(config)
-    await emit({"type": "node_start", "node": "supervisor"})
     prompt = (
         "You are the Supervisor of a research team (Researcher, Analyst, Writer, "
         f"Critic). In 2-3 sentences, state your plan for answering: {state['question']}"
     )
     plan = await speak("supervisor", prompt, "supervisor", emit)
-    await emit({"type": "node_end", "node": "supervisor"})
     return {"plan": plan}
 
 
 async def researcher(state: PipelineState, config) -> PipelineState:
     emit = _emit_of(config)
-    await emit({"type": "node_start", "node": "researcher"})
     prompt = (
         "You are the Researcher. List the key concrete facts (with confidence "
         f"levels) needed to answer: {state['question']}\nPlan: {state.get('plan', '')}"
     )
     research = await speak("researcher", prompt, "researcher", emit)
-    await emit({"type": "node_end", "node": "researcher"})
     return {"research": research}
 
 
 async def analyst(state: PipelineState, config) -> PipelineState:
     emit = _emit_of(config)
-    await emit({"type": "node_start", "node": "analyst"})
     prompt = (
         "You are the Analyst. Weigh the trade-offs and give a verdict with "
         f"confidence for: {state['question']}\nPlan: {state.get('plan', '')}"
     )
     analysis = await speak("analyst", prompt, "analyst", emit)
-    await emit({"type": "node_end", "node": "analyst"})
     return {"analysis": analysis}
 
 
 async def writer(state: PipelineState, config) -> PipelineState:
     emit = _emit_of(config)
     revisions = state.get("revisions", 0)
-    await emit({"type": "node_start", "node": "writer", "revision": revisions})
     if revisions == 0:
         prompt = (
             "You are the Writer. Merge the research and analysis into a concise "
@@ -224,14 +227,12 @@ async def writer(state: PipelineState, config) -> PipelineState:
         )
         script = "writer-revision"
     draft = await speak("writer", prompt, script, emit)
-    await emit({"type": "node_end", "node": "writer"})
     return {"draft": draft, "revisions": revisions + 1}
 
 
 async def critic(state: PipelineState, config) -> PipelineState:
     emit = _emit_of(config)
     revisions = state.get("revisions", 0)
-    await emit({"type": "node_start", "node": "critic"})
 
     if os.environ.get("OPENAI_API_KEY"):
         prompt = (
@@ -255,7 +256,6 @@ async def critic(state: PipelineState, config) -> PipelineState:
         "to": "end" if approved else "writer",
         "decision": "approve" if approved else "revise",
     })
-    await emit({"type": "node_end", "node": "critic"})
     return {"critique": critique, "approved": approved}
 
 
@@ -276,7 +276,7 @@ def build_graph():
     g.add_node("critic", critic)
 
     g.add_edge(START, "supervisor")
-    # Parallel fan-out; writer is a join — it waits for both branches.
+    # Parallel fan-out; writer is a join, it waits for both branches.
     g.add_edge("supervisor", "researcher")
     g.add_edge("supervisor", "analyst")
     g.add_edge("researcher", "writer")
@@ -286,3 +286,22 @@ def build_graph():
         "critic", route_after_critic, {"revise": "writer", "approve": END}
     )
     return g.compile()
+
+
+# --------------------------------------------------------------------------- #
+# Registry contract (see backend/agents/__init__.py)
+# --------------------------------------------------------------------------- #
+
+SPEC = GRAPH_SPEC
+
+
+def build():
+    return build_graph()
+
+
+def make_input(question: str) -> dict:
+    return {"question": question, "revisions": 0}
+
+
+def extract(result: dict) -> str:
+    return result.get("draft", "")
