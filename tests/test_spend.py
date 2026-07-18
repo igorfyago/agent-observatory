@@ -337,3 +337,44 @@ def test_the_callback_meters_the_openai_token_usage_shape(spend):
 def test_a_junk_response_cannot_break_a_run(spend):
     spend.SpendCallback().on_llm_end(object())  # no generations, no llm_output
     assert spend.status()["today_usd"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# a failed delivery must not burn the day's alert
+# --------------------------------------------------------------------------- #
+
+def test_a_failed_send_lets_the_threshold_fire_again(spend, monkeypatch):
+    """The bug this guards: the claim used to be recorded before the send, and
+    the send swallows its own errors, so one SES outage at the moment a cap was
+    crossed silenced that threshold for the whole day, exactly when the owner
+    most needed telling."""
+    monkeypatch.setenv("OBS_SES_FROM", "alerts@example.com")
+
+    sent = []
+    monkeypatch.setattr(spend, "_email", lambda s, b: (sent.append(s), False)[1])
+    burn(spend, 0.55)                            # crosses 50% of the $1 test cap
+    assert len(sent) == 1 and "50%" in sent[0]   # attempted, and reached nobody
+
+    # SES is healthy again: the SAME threshold must still get announced. The
+    # dollar figure moves with the extra spend, so the threshold is what counts.
+    monkeypatch.setattr(spend, "_email", lambda s, b: (sent.append(s), True)[1])
+    burn(spend, 0.01)
+    assert len(sent) == 2 and "50%" in sent[1]
+
+    # and now that it has actually landed, it must not repeat
+    burn(spend, 0.01)
+    assert len(sent) == 2
+
+
+def test_log_only_delivery_is_not_treated_as_a_failure(spend, monkeypatch):
+    """With no mailer configured the log line IS the delivery, so it must claim
+    the threshold and not re-log on every single request."""
+    monkeypatch.delenv("OBS_SES_FROM", raising=False)
+
+    calls = []
+    real_email = spend._email
+    monkeypatch.setattr(spend, "_email", lambda s, b: (calls.append(s), real_email(s, b))[1])
+    burn(spend, 0.55)
+    burn(spend, 0.01)
+    burn(spend, 0.01)
+    assert len(calls) == 1

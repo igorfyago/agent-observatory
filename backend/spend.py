@@ -504,7 +504,15 @@ def _alerts_pending(conn: sqlite3.Connection, day_usd: float, month_usd: float) 
             # every one of them so none fires later, but announce only the
             # highest: the owner wants to hear "cap reached", not that plus two
             # stale warnings about a line already behind us.
-            _send_alert(scope, max(claimed), spent, cap, pct)
+            if not _send_alert(scope, max(claimed), spent, cap, pct):
+                # Delivery failed, so hand the claims back. The claim exists to
+                # stop DUPLICATE announcements, not to record an attempt, and an
+                # alert nobody received was never announced. Without this, one
+                # blip of SES trouble at the moment a cap is crossed silences
+                # that threshold for the rest of the day, which is precisely
+                # when the owner most needs to hear from it.
+                for t in claimed:
+                    _release_alert(conn, f"{scope}-{t}")
 
 
 def _claim_alert(conn: sqlite3.Connection, kind: str) -> bool:
@@ -517,13 +525,23 @@ def _claim_alert(conn: sqlite3.Connection, kind: str) -> bool:
     return cur.rowcount > 0
 
 
-def _send_alert(scope: str, threshold: int, spent: float, cap: float, pct: float) -> None:
+def _release_alert(conn: sqlite3.Connection, kind: str) -> None:
+    """Undo a claim whose announcement never reached anyone."""
+    day, _ = _keys()
+    conn.execute("DELETE FROM alerts WHERE day = ? AND kind = ?", (day, kind))
+
+
+def _send_alert(scope: str, threshold: int, spent: float, cap: float, pct: float) -> bool:
     """Tell the owner. NEVER raises, whatever goes wrong downstream.
 
     This runs inside check() and record(), which means it runs inside a visitor's
     request. An alert that breaks the request is worse than an alert that gets
     lost, so the whole thing, formatting included, is wrapped and the log keeps
     a copy of anything that could not be delivered.
+
+    Returns True when the alert was delivered, or deliberately logged because no
+    mailer is configured. False means it reached nobody and the caller should
+    let the threshold fire again later.
     """
     try:
         # what the body says about blocking follows the real state, not the
@@ -552,18 +570,24 @@ def _send_alert(scope: str, threshold: int, spent: float, cap: float, pct: float
             "raise the ceiling with OBS_DAILY_USD / OBS_MONTHLY_USD, or leave it be.",
         ])
         log.warning("spend alert: %s", subject)
-        _email(subject, body)
+        return _email(subject, body)
     except Exception as exc:  # noqa: BLE001 - alerting never breaks a request
         log.warning("spend: alert %s-%s could not be delivered: %s", scope, threshold, exc)
+        return False
 
 
-def _email(subject: str, body: str) -> None:
-    """SES if configured, log line if not. Swallows everything."""
+def _email(subject: str, body: str) -> bool:
+    """SES if configured, log line if not. Swallows everything.
+
+    True means it got somewhere: either SES accepted it, or no mailer is
+    configured and the log line IS the delivery. False means a mailer was
+    configured and it failed, which is the only case worth retrying.
+    """
     sender = os.environ.get("OBS_SES_FROM")
     to = os.environ.get("OBS_ALERT_TO", DEFAULT_ALERT_TO)
     if not sender:
         log.warning("spend: no OBS_SES_FROM, alert not emailed:\n%s\n%s", subject, body)
-        return
+        return True
     try:
         import boto3
 
@@ -577,8 +601,10 @@ def _email(subject: str, body: str) -> None:
             },
         )
         log.info("spend: alert emailed to %s", to)
+        return True
     except Exception as exc:  # noqa: BLE001 - an alert must never break a request
         log.warning("spend: SES send failed (%s), alert logged only:\n%s", exc, body)
+        return False
 
 
 # --------------------------------------------------------------------------- #

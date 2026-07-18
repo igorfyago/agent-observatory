@@ -42,7 +42,12 @@ def spend(tmp_path, monkeypatch):
 def sent(spend, monkeypatch):
     """Capture alert emails instead of sending them."""
     outbox: list[tuple[str, str]] = []
-    monkeypatch.setattr(spend, "_email", lambda subject, body: outbox.append((subject, body)))
+
+    def capture(subject: str, body: str) -> bool:
+        outbox.append((subject, body))
+        return True        # captured IS delivered, so the claim must stick
+
+    monkeypatch.setattr(spend, "_email", capture)
     return outbox
 
 
