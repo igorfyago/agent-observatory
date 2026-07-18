@@ -1,12 +1,14 @@
 """Shared test setup for the observatory.
 
 Two invariants for the whole suite:
+0. No test reaches OpenAI: a dummy key is planted so graphs can be built.
 1. No test touches the real spend meter: OBS_SPEND_DB points at a fresh temp
    file per test, so no test can see another one's dollars.
 2. No test can email anyone: OBS_SES_FROM is cleared, which puts the alerting
    path in log-only mode unless a test opts in and mocks boto3.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -14,6 +16,10 @@ import pytest
 
 BACKEND = Path(__file__).resolve().parents[1] / "backend"
 sys.path.insert(0, str(BACKEND))
+
+# Building a graph constructs its chat model, which wants a key present. A
+# dummy one keeps the topology tests offline: nothing here ever calls out.
+os.environ.setdefault("OPENAI_API_KEY", "test-key-not-real")
 
 
 @pytest.fixture()
