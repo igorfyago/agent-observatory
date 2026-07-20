@@ -36,17 +36,17 @@
   }
   .brand span { color: var(--accent); }
   .tab-btn {
-    flex: none; background: transparent; border: 1px solid transparent; border-radius: 6px;
-    color: var(--dim); font-family: var(--sans); font-size: 12.5px; font-weight: 500;
-    padding: 6px 11px; cursor: pointer; transition: all .15s;
+    flex: none; background: transparent; border: 1px solid var(--line); border-radius: 999px;
+    color: var(--dim); font-family: var(--sans); font-size: 12.5px; font-weight: 600;
+    padding: 6px 14px; cursor: pointer; transition: all .15s;
   }
   .tab-btn:hover { color: var(--text); background: var(--panel2); }
-  .tab-btn.active { color: var(--text); background: var(--panel2); border-color: var(--accent); }
+  .tab-btn.active { color: #fff; background: var(--accent); border-color: var(--accent); }
   .tab-btn .kind {
     font-family: var(--mono); font-size: 9px; letter-spacing: .08em;
     color: var(--dim); margin-left: 6px; text-transform: uppercase;
   }
-  .tab-btn.active .kind { color: var(--accent); }
+  .tab-btn.active .kind { color: rgba(255,255,255,.75); }
   .spacer { flex: 1; min-width: 12px; }
   .chip {
     flex: none; font-family: var(--mono); font-size: 10.5px; padding: 3px 8px;
@@ -172,6 +172,48 @@
   .tool.running { border-left-color: var(--accent); }
   .tool.running summary .nm { color: var(--accent); }
 
+  /* family cross-links */
+  .xlinks { flex: none; display: flex; gap: 2px; margin-left: 8px; padding-left: 10px; border-left: 1px solid var(--line); }
+  .xlinks a {
+    color: var(--dim); text-decoration: none; font-family: var(--mono);
+    font-size: 10.5px; padding: 3px 6px; border-radius: 4px; letter-spacing: .05em;
+  }
+  .xlinks a:hover { color: var(--text); background: var(--panel2); }
+
+  /* ---------- desk lane (Marcus's recorded runs) ---------- */
+  #deskList { flex: 1; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .desk-empty { color: var(--dim); font-size: 13px; line-height: 1.6; padding: 12px 4px; }
+  .desk-empty a { color: var(--accent); }
+  .desk-hint { color: var(--dim); font-family: var(--mono); font-size: 11px; }
+  .drun {
+    display: grid; grid-template-columns: 52px 46px 1fr 12px 44px 58px; gap: 8px; align-items: center;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 8px 10px; font-family: var(--mono); font-size: 11.5px; color: var(--dim);
+    cursor: pointer; transition: all .15s;
+  }
+  .drun:hover { border-color: var(--dim); color: var(--text); }
+  .drun.sel { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+  .drun .tick { color: var(--text); font-weight: 600; }
+  .drun .vchip {
+    justify-self: start; border: 1px solid var(--line); border-radius: 4px;
+    padding: 2px 6px; font-size: 10px; letter-spacing: .05em; color: var(--amber);
+    border-color: rgba(210,153,34,.5); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+  }
+  .drun .adot { width: 8px; height: 8px; border-radius: 50%; background: var(--panel2); border: 1px solid var(--line); }
+  .drun .adot.on { background: var(--green); border-color: var(--green); }
+  .drun .oc.bad { color: var(--red); }
+  .drun .lat { text-align: right; font-variant-numeric: tabular-nums; }
+
+  #deskOrder { display: none; align-items: flex-start; gap: 10px; padding: 12px 14px; border-top: 1px solid var(--line); background: var(--panel); }
+  #deskOrder.show { display: flex; }
+  #deskOrder .k { font: 600 10px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--dim); padding-top: 3px; }
+  #deskOrder .line { flex: 1; font-family: var(--mono); font-size: 14.5px; line-height: 1.5; color: var(--text); word-break: break-word; user-select: all; }
+  #deskOrder button {
+    flex: none; border: 1px solid var(--line); background: var(--panel2); color: var(--text);
+    border-radius: 6px; padding: 6px 12px; font-size: 11.5px; font-weight: 600; cursor: pointer;
+  }
+  #deskOrder button:hover { border-color: var(--accent); }
+
   /* voice agent card */
   #voiceCard { padding: 22px; color: var(--dim); font-size: 13px; line-height: 1.6; max-width: 620px; }
   #voiceCard h3 { color: var(--text); font-size: 15px; margin-bottom: 8px; }
@@ -183,6 +225,8 @@
 </style>
 </head>
 <body>
+<!-- Estate bar: same tabs + sign-in state as every other b4rruf3t app. -->
+<script src="https://auth.b4rruf3t.com/eco-nav.js" defer></script>
 <nav class="topbar">
   <div class="brand">agent <span>observatory</span></div>
   <div id="tabs" style="display:flex;gap:4px"></div>
@@ -190,11 +234,18 @@
   <div class="chip" id="chipLlm">...</div>
   <div class="chip" id="chipLs">langsmith</div>
   <div class="chip" id="chipRun">idle</div>
+  <div class="xlinks">
+    <a href="https://b4rruf3t.com">portal</a>
+    <a href="https://bank.b4rruf3t.com">bank</a>
+    <a href="https://mart.b4rruf3t.com">mart</a>
+    <a href="https://desk.b4rruf3t.com">desk</a>
+  </div>
 </nav>
 
 <main>
   <section id="chat">
     <div id="messages"></div>
+    <div id="deskList" class="hide"></div>
     <div id="approve">
       <button class="ok" data-action="approve">approve</button>
       <button data-action="revise">revise</button>
@@ -210,6 +261,7 @@
     <div id="stage"><span id="stageTxt">idle</span></div>
     <div id="graphWrap"></div>
     <div id="voiceCard" class="hide"></div>
+    <div id="deskOrder"></div>
     <div id="trace"><h2>trace</h2><div id="trows"></div></div>
   </section>
 </main>
@@ -222,6 +274,9 @@ const messages = $("#messages"), trows = $("#trows");
 let AGENTS = [], AGENT = null, SPEC = null;
 let bubbles = {}, traceRows = {}, runCount = {}, tools = {};
 let activeNodes = new Set(), running = false, pendingThread = null;
+let deskRuns = [], deskSel = null, deskTimer = null, deskReplay = 0;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function el(tag, cls, html) {
   const e = document.createElement(tag);
@@ -254,6 +309,7 @@ function select(id) {
   AGENT = AGENTS.find((a) => a.id === id) || AGENTS[0];
   document.querySelectorAll(".tab-btn").forEach((b) =>
     b.classList.toggle("active", b.dataset.id === AGENT.id));
+  stopDesk();
   messages.innerHTML = "";
   trows.innerHTML = "";
   pendingThread = null;
@@ -261,11 +317,15 @@ function select(id) {
   addBubble("observatory", AGENT.tagline);
 
   const isVoice = AGENT.kind === "voice";
+  const isDesk = AGENT.kind === "desk";
   $("#graphWrap").classList.toggle("hide", isVoice);
   $("#voiceCard").classList.toggle("hide", !isVoice);
-  $("#composer").classList.toggle("hide", isVoice);
+  $("#composer").classList.toggle("hide", isVoice || isDesk);
   $("#trace").classList.toggle("hide", isVoice);
+  $("#messages").classList.toggle("hide", isDesk);
+  $("#deskList").classList.toggle("hide", !isDesk);
 
+  if (isDesk) { startDesk(); SPEC = null; return; }
   if (isVoice) { renderVoice(AGENT); SPEC = null; return; }
 
   SPEC = AGENT.spec;
@@ -288,6 +348,157 @@ function renderVoice(a) {
     <p style="margin-top:14px">The browser WebRTC bridge to the Realtime API is not wired up in
     this build: the persona, its tool schemas and its server-side implementations are hosted and
     callable, but there is no microphone session yet.</p>`;
+}
+
+/* ---------------- the desk lane: Marcus's recorded decisions ----------------
+   Not chat-runnable: runs are POSTed by ai-trading-desk whenever someone talks
+   to Marcus on desk.b4rruf3t.com. The lane lists them and replays a clicked
+   run through the same DAG renderer the live agents use, paced by the
+   recorded per-node timings scaled to about two seconds. */
+
+function stopDesk() {
+  if (deskTimer) { clearInterval(deskTimer); deskTimer = null; }
+  deskReplay++;                       // cancels any in-flight replay
+  deskRuns = []; deskSel = null;
+  $("#deskOrder").classList.remove("show");
+}
+
+async function startDesk() {
+  $("#deskList").innerHTML = "";
+  $("#graphWrap").innerHTML =
+    `<div class="desk-hint">select a run on the left to replay the decision</div>`;
+  $("#stageTxt").textContent = "waiting for desk runs";
+  await refreshDesk();
+  deskTimer = setInterval(refreshDesk, 20000);
+}
+
+async function refreshDesk() {
+  let data;
+  try { data = await (await fetch("/api/desk/runs?limit=50")).json(); }
+  catch { return; }
+  if (AGENT?.kind !== "desk") return;          // switched away mid-fetch
+  const runs = data.runs || [];
+  const list = $("#deskList");
+  if (!runs.length) {
+    list.innerHTML = `<div class="desk-empty">no desk runs yet - runs land here
+      live whenever someone talks to Marcus on
+      <a href="https://desk.b4rruf3t.com">desk.b4rruf3t.com</a></div>`;
+    deskRuns = [];
+    return;
+  }
+  if (!deskRuns.length) list.innerHTML = "";   // clear the empty state
+  const known = new Set(deskRuns.map((r) => r.id));
+  // Oldest new run first, so prepending keeps the list newest-first without
+  // touching existing rows: the selection never moves under the user.
+  runs.filter((r) => !known.has(r.id)).reverse().forEach((r) => {
+    list.prepend(deskRow(r));
+    deskRuns.unshift(r);
+  });
+}
+
+function deskRow(r) {
+  const t = new Date(r.received_at);
+  const hhmm = isNaN(t) ? "?" :
+    `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+  const row = el("div", "drun");
+  row.dataset.id = r.id;
+  row.title = r.order_line || "";
+  row.innerHTML =
+    `<span class="when">${hhmm}</span>` +
+    `<span class="tick">${escapeHtml(r.ticker || "?")}</span>` +
+    `<span class="vchip">${escapeHtml(r.verdict || "-")}</span>` +
+    `<span class="adot${r.armed ? " on" : ""}" title="${r.armed ? "armed" : "not armed"}"></span>` +
+    `<span class="oc${r.outcome === "ok" ? "" : " bad"}">${escapeHtml(r.outcome || "")}</span>` +
+    `<span class="lat">${Number(r.latency_ms) || 0} ms</span>`;
+  row.addEventListener("click", () => selectDeskRun(r.id));
+  return row;
+}
+
+async function selectDeskRun(id) {
+  deskSel = id;
+  document.querySelectorAll(".drun").forEach((r) =>
+    r.classList.toggle("sel", Number(r.dataset.id) === id));
+  let run;
+  try { run = await (await fetch("/api/desk/runs/" + id)).json(); }
+  catch { return; }
+  if (AGENT?.kind !== "desk" || deskSel !== id) return;
+  replayDeskRun(run);
+}
+
+/* The stored spec uses edge pairs [["a","b"]]; the layout module wants
+   {from,to}. When a record carries no spec at all, derive a linear one from
+   the node sequence so old records still draw. */
+function deskSpec(rec) {
+  const nodes = rec.nodes || [];
+  const s = rec.spec && (rec.spec.nodes || []).length ? rec.spec : {
+    nodes: nodes.map((n) => ({ id: n.node, label: n.node })),
+    edges: nodes.slice(1).map((n, i) => [nodes[i].node, n.node]),
+  };
+  return {
+    nodes: (s.nodes || []).map((n) => typeof n === "string" ? { id: n }
+      : { id: n.id, label: n.label || n.id, role: n.hint || "" }),
+    edges: (s.edges || []).map((e) => Array.isArray(e)
+      ? { from: e[0], to: e[1] } : e),
+  };
+}
+
+async function replayDeskRun(run) {
+  const my = ++deskReplay;
+  const rec = run.record || {};
+  SPEC = deskSpec(rec);
+  $("#graphWrap").innerHTML = ObsLayout.renderSvg(SPEC, { direction: "TB" });
+  trows.innerHTML = "";
+  $("#deskOrder").classList.remove("show");
+
+  const nodes = rec.nodes || [];
+  const totalMs = nodes.reduce((s, n) => s + Math.max(1, Number(n.ms) || 1), 0);
+  const scale = totalMs ? 2000 / totalMs : 0;   // whole replay ~ 2 seconds
+  $("#stageTxt").innerHTML =
+    `<span class="live">replaying</span>&nbsp; ${escapeHtml(rec.ticker || "")} · ${escapeHtml(rec.started_at || "")}`;
+
+  for (let i = 0; i < nodes.length; i++) {
+    if (my !== deskReplay) return;              // superseded or tab switched
+    const n = nodes[i];
+    const svgNode = nodeEl(n.node);
+    if (svgNode) { svgNode.classList.remove("done"); svgNode.classList.add("active"); }
+    const edge = i > 0 &&
+      document.getElementById("e-" + nodes[i - 1].node + "-" + n.node);
+    if (edge) edge.classList.add("active");
+
+    const row = el("div", "trow active");
+    row.innerHTML =
+      `<span class="st">&#9654;</span><span>${escapeHtml(n.node)} · ${escapeHtml(n.note || "")}</span>` +
+      `<span></span><span class="num">${Number(n.ms) || 0} ms</span><span class="tag">recorded</span>`;
+    trows.appendChild(row);
+    row.scrollIntoView({ block: "nearest" });
+
+    await sleep(Math.max(80, (Number(n.ms) || 1) * scale));
+    if (my !== deskReplay) return;
+    if (svgNode) { svgNode.classList.remove("active"); svgNode.classList.add("done"); }
+    if (edge) edge.classList.remove("active");
+    row.className = "trow done";
+    row.querySelector(".st").innerHTML = "&#10003;";
+    row.querySelector(".tag").textContent = "done";
+  }
+
+  document.getElementById("endcap")?.classList.add("done");
+  $("#stageTxt").textContent =
+    `${rec.ticker || ""} · ${rec.verdict || "-"} · ${rec.armed ? "armed" : "not armed"} · ${Number(rec.latency_ms) || 0} ms`;
+  showDeskOrder(rec.order || run.order_line || "");
+}
+
+function showDeskOrder(text) {
+  const box = $("#deskOrder");
+  box.innerHTML =
+    `<span class="k">order</span><div class="line">${escapeHtml(text || "(no order line)")}</div>` +
+    `<button id="copyOrder">copy</button>`;
+  box.classList.add("show");
+  $("#copyOrder").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(text); } catch { return; }
+    const b = $("#copyOrder");
+    b.textContent = "copied";
+    setTimeout(() => { const x = $("#copyOrder"); if (x) x.textContent = "copy"; }, 1200);
+  });
 }
 
 function setMode(m) {
