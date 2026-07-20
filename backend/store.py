@@ -13,6 +13,7 @@ keeps its rows across deploys.
 """
 from __future__ import annotations
 
+import json
 import os
 import random
 import sqlite3
@@ -64,6 +65,22 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     tokens INTEGER NOT NULL,
     latency_ms INTEGER NOT NULL,
     outcome TEXT NOT NULL            -- 'ok' | 'error' | 'timeout'
+);
+
+-- Trade decisions POSTed by the desk (Marcus, the options voice agent).
+-- The raw record is kept whole in `payload` so the UI can replay the run
+-- exactly as it happened; the other columns are just the list view.
+CREATE TABLE IF NOT EXISTS desk_runs (
+    id INTEGER PRIMARY KEY,
+    received_at TEXT NOT NULL,       -- ISO-8601 UTC, when it landed here
+    agent TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    verdict TEXT NOT NULL,
+    armed INTEGER NOT NULL,          -- 0 | 1
+    latency_ms INTEGER NOT NULL,
+    order_line TEXT NOT NULL,
+    payload TEXT NOT NULL            -- the full run record, JSON
 );
 """
 
@@ -158,3 +175,85 @@ def log_run(agent_id: str, kind: str, question: str, tool_calls: int,
     )
     conn.commit()
     conn.close()
+
+
+# ------------------------------------------------------------- desk runs ----
+
+# The table is a rolling window, not an archive: the newest runs are the ones
+# anybody replays, and an unattended public box must not grow a disk problem.
+DESK_RUNS_CAP = 2000
+
+_DESK_SUMMARY_COLS = ("id", "received_at", "agent", "ticker", "outcome",
+                      "verdict", "armed", "latency_ms", "order_line")
+
+
+def save_desk_run(record: dict) -> int:
+    """Store one desk decision whole, prune past the cap, return its id."""
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "INSERT INTO desk_runs (received_at, agent, ticker, outcome, verdict,"
+            " armed, latency_ms, order_line, payload) VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                datetime.now(timezone.utc).isoformat(),
+                str(record.get("agent", "")),
+                str(record.get("ticker", "")),
+                str(record.get("outcome", "")),
+                str(record.get("verdict", "")),
+                1 if record.get("armed") else 0,
+                int(record.get("latency_ms") or 0),
+                str(record.get("order", ""))[:500],
+                json.dumps(record, separators=(",", ":"), default=str),
+            ),
+        )
+        run_id = cur.lastrowid
+        conn.execute(
+            "DELETE FROM desk_runs WHERE id NOT IN"
+            " (SELECT id FROM desk_runs ORDER BY id DESC LIMIT ?)",
+            (DESK_RUNS_CAP,),
+        )
+        conn.commit()
+        return run_id
+    finally:
+        conn.close()
+
+
+def list_desk_runs(limit: int = 50) -> list[dict]:
+    """Newest-first summaries for the run list. No payload: the list refreshes
+    every 20 seconds and only a clicked run needs the full record."""
+    limit = max(1, min(int(limit), 200))
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            f"SELECT {', '.join(_DESK_SUMMARY_COLS)} FROM desk_runs"
+            " ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    finally:
+        conn.close()
+    out = [dict(zip(_DESK_SUMMARY_COLS, r)) for r in rows]
+    for r in out:
+        r["armed"] = bool(r["armed"])
+    return out
+
+
+def get_desk_run(run_id: int) -> dict | None:
+    """One run with the full stored record parsed back out, or None."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            f"SELECT {', '.join(_DESK_SUMMARY_COLS)}, payload FROM desk_runs"
+            " WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    out = dict(zip(_DESK_SUMMARY_COLS, row[:-1]))
+    out["armed"] = bool(out["armed"])
+    try:
+        out["record"] = json.loads(row[-1])
+    except json.JSONDecodeError:
+        out["record"] = {}
+    return out

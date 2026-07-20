@@ -22,7 +22,7 @@ from voice import personas
 class Agent:
     id: str
     label: str
-    kind: str                      # "text" | "voice"
+    kind: str                      # "text" | "voice" | "desk"
     tagline: str
     module: object = None          # text agents: the module holding the contract
     persona: str = ""              # voice agents: key into personas.PERSONAS
@@ -112,6 +112,15 @@ AGENTS: list[Agent] = [
         tagline="AI quoting agent for a renovation company.",
         persona="quinn",
     ),
+    # Not chat-runnable: Marcus lives on the trading desk and his runs arrive
+    # over POST /api/desk/runs whenever someone talks to him. This tab is the
+    # replay lane for those recorded decisions.
+    Agent(
+        id="marcus",
+        label="Marcus",
+        kind="desk",
+        tagline="The desk's options voice. Every trade decision he makes lands here live.",
+    ),
 ]
 
 BY_ID: dict[str, Agent] = {a.id: a for a in AGENTS}
@@ -136,9 +145,11 @@ def as_json() -> list[dict]:
         if a.kind == "text":
             entry["spec"] = a.spec
             entry["placeholder"] = a.placeholder
-        else:
+        elif a.kind == "voice":
             p = personas.PERSONAS.get(a.persona, {})
             entry["voice"] = p.get("voice", "")
             entry["tools"] = [t["name"] for t in p.get("tools", [])]
+        # kind "desk" carries nothing extra: its data arrives per run over
+        # /api/desk/runs, spec included, so nothing here can go stale.
         out.append(entry)
     return out

@@ -182,6 +182,60 @@ async def run_persona_tool(persona_id: str, body: dict):
     return {"result": personas_store.run_custom_tool(persona_id, name, args)}
 
 
+# ------------------------------------------------------------------ desk ----
+
+# One run record is a handful of nodes and one order line; 32KB is generous.
+# Anything bigger is not a run record.
+MAX_DESK_RECORD_BYTES = 32 * 1024
+
+
+@app.post("/api/desk/runs")
+async def desk_run_ingest(request: Request,
+                          x_desk_token: str | None = Header(default=None)):
+    """One trade decision from the desk's graph, POSTed by ai-trading-desk.
+
+    Write-gated and fails shut: with OBS_INGEST_TOKEN unset there is no token
+    that opens it, because a public box must not carry an open write endpoint.
+    The compose file hands the same token to both services.
+    """
+    expected = os.environ.get("OBS_INGEST_TOKEN", "")
+    if not expected or x_desk_token != expected:
+        raise HTTPException(403, "desk ingest is closed on this server")
+
+    raw = await request.body()
+    if len(raw) > MAX_DESK_RECORD_BYTES:
+        raise HTTPException(413, f"run record over {MAX_DESK_RECORD_BYTES} bytes")
+    try:
+        record = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        # UnicodeDecodeError too: a non-UTF-8 body is a caller mistake and
+        # deserves a 400, not a stack trace (found live, a cp1252 middle dot).
+        raise HTTPException(400, "body is not valid UTF-8 JSON") from exc
+    if not isinstance(record, dict):
+        raise HTTPException(400, "run record must be a JSON object")
+    if (not str(record.get("agent") or "").strip()
+            or not str(record.get("started_at") or "").strip()
+            or not isinstance(record.get("nodes"), list)):
+        raise HTTPException(400, "run record needs agent, started_at and a nodes list")
+
+    return {"id": store.save_desk_run(record)}
+
+
+@app.get("/api/desk/runs")
+def desk_runs_list(limit: int = 50):
+    """Newest-first summaries for the run list. Read-only, so it is open."""
+    return {"runs": store.list_desk_runs(limit)}
+
+
+@app.get("/api/desk/runs/{run_id}")
+def desk_run_get(run_id: int):
+    """The full stored record for one run, for the UI to replay."""
+    run = store.get_desk_run(run_id)
+    if run is None:
+        raise HTTPException(404, f"no desk run {run_id}")
+    return run
+
+
 # ------------------------------------------------------------------ misc ----
 
 @app.get("/api/health")
