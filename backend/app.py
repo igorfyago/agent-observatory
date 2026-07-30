@@ -1,15 +1,17 @@
 """Agent Observatory · FastAPI backend.
 
-A multi-agent host: the registry (backend/registry.py) lists every hosted
-agent, the runner (backend/runner.py) turns any of them into a live frame
-stream, and the static UI draws the real graph topology plus every tool call
-as it happens.
+A multi-agent host that runs itself. The registry (backend/registry.py) lists
+every hosted agent; the stage (backend/stage.py) is the single shared
+performance every browser watches over GET /api/live; the autopilot
+(backend/autopilot.py) keeps real runs flowing whenever the room is not
+empty, so there is information on screen before anyone types anything.
 
 Adding an agent is one registry entry. Nothing here needs to change.
 """
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -23,13 +25,27 @@ from pydantic import BaseModel
 # Load project-root .env before anything reads an env var.
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-import registry  # noqa: E402  (needs env loaded first)
+import autopilot  # noqa: E402  (needs env loaded first)
+import registry  # noqa: E402
 import runner  # noqa: E402
 import spend  # noqa: E402
+import stage  # noqa: E402
 import store  # noqa: E402
 from voice import personas, personas_store  # noqa: E402
 
-app = FastAPI(title="Agent Observatory")
+
+@contextlib.asynccontextmanager
+async def lifespan(_app: FastAPI):
+    pilot = asyncio.create_task(autopilot.loop())
+    try:
+        yield
+    finally:
+        pilot.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await pilot
+
+
+app = FastAPI(title="Agent Observatory", lifespan=lifespan)
 
 
 class ChatIn(BaseModel):
@@ -42,6 +58,14 @@ class ResumeIn(BaseModel):
     thread: str
     action: str = "approve"       # approve | revise | reject
     notes: str = ""
+
+
+class ReplayIn(BaseModel):
+    """Time travel: re-run a thread from one of its saved checkpoints."""
+    agent: str
+    thread: str
+    checkpoint_id: str
+    step: int = -1                # display only, echoed back in the title
 
 
 class PersonaIn(BaseModel):
@@ -63,6 +87,7 @@ def list_agents():
         "custom": personas_store.list_customs(),
         "default": registry.DEFAULT_ID,
         "mode": runner.mode(),
+        "autopilot": autopilot.status(),
     }
 
 
@@ -76,7 +101,7 @@ def graph_spec(agent: str = registry.DEFAULT_ID):
     return {"spec": a.spec, "mode": runner.mode()}
 
 
-# ------------------------------------------------------------------ chat ----
+# ----------------------------------------------------------- the stage -----
 
 def _ip(request: Request) -> str:
     """Client IP, trusting Caddy's X-Forwarded-For in front of us."""
@@ -89,22 +114,31 @@ def _sse(ev: dict) -> str:
     return f"data: {json.dumps(ev, default=str)}\n\n"
 
 
-def _stream_response(agent, question, thread=None, resume=None, ip=None):
+@app.get("/api/live")
+async def live(request: Request):
+    """The one stream every browser watches.
+
+    A new viewer gets a hello frame (stage, stats, spend, mode), then the
+    current run replayed from its first frame, then everything live. A ping
+    every 15 quiet seconds keeps proxies from folding the connection.
+    """
+    sub_id, queue = stage.subscribe()
+
     async def gen():
-        # The spend guard wraps the WHOLE run, so its concurrency slot is
-        # released even if the graph blows up mid-stream.
         try:
-            with spend.guard(ip):
-                async for frame in runner.stream(agent, question, thread=thread,
-                                                 resume=resume):
-                    yield _sse(frame)
-        except spend.SpendRefused as refusal:
-            yield _sse({"type": "error", "message": refusal.message,
-                        **refusal.as_dict()})
-        except asyncio.CancelledError:  # client hung up
-            raise
-        except Exception as exc:
-            yield _sse({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
+            yield _sse(stage.hello())
+            yield _sse({"type": "autopilot", **autopilot.status()})
+            for frame in stage.snapshot_frames():
+                yield _sse(frame)
+            while True:
+                try:
+                    frame = await asyncio.wait_for(queue.get(), timeout=15)
+                except asyncio.TimeoutError:
+                    yield _sse({"type": "ping"})
+                    continue
+                yield _sse(frame)
+        finally:
+            stage.unsubscribe(sub_id)
 
     return StreamingResponse(
         gen(),
@@ -113,26 +147,98 @@ def _stream_response(agent, question, thread=None, resume=None, ip=None):
     )
 
 
-@app.post("/api/chat")
+@app.post("/api/chat", status_code=202)
 async def chat(body: ChatIn, request: Request):
-    """Run one agent and stream its nodes, tokens and tool calls as SSE."""
-    agent = registry.get(body.agent)
-    if agent is None or agent.kind != "text":
-        raise HTTPException(404, f"no text agent '{body.agent}'")
-    return _stream_response(agent, body.question, ip=_ip(request))
+    """Put a visitor's question on the stage. Frames arrive on /api/live."""
+    if not body.question.strip():
+        raise HTTPException(400, "ask something first")
+    try:
+        meta = await stage.submit(body.agent, body.question.strip(),
+                                  source="visitor", ip=_ip(request))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except stage.StageBusy as busy:
+        raise HTTPException(409, busy.message) from busy
+    return {"accepted": True, "run": meta}
 
 
-@app.post("/api/resume")
+@app.post("/api/resume", status_code=202)
 async def resume(body: ResumeIn, request: Request):
-    """Resume an agent parked at a human-approval interrupt."""
+    """Decide a parked interrupt. Beating the autopilot's countdown counts."""
     agent = registry.get(body.agent)
     if agent is None or not agent.interactive:
         raise HTTPException(404, f"agent '{body.agent}' does not pause for approval")
-    return _stream_response(
-        agent, "", thread=body.thread,
-        resume={"action": body.action, "notes": body.notes},
-        ip=_ip(request),
-    )
+    try:
+        meta = await stage.submit(
+            body.agent, "", source="visitor", ip=_ip(request),
+            title=f"decision: {body.action}",
+            resume={"action": body.action, "notes": body.notes},
+            thread=body.thread)
+    except stage.NothingPending as exc:
+        raise HTTPException(409, "nothing is waiting for approval") from exc
+    except stage.StageBusy as busy:
+        raise HTTPException(409, busy.message) from busy
+    return {"accepted": True, "run": meta}
+
+
+@app.post("/api/replay", status_code=202)
+async def replay(body: ReplayIn, request: Request):
+    """Time travel: re-execute a thread from one of its saved checkpoints.
+
+    This is LangGraph's checkpointer doing the work: input None plus a
+    checkpoint_id means "pick the graph up exactly there and run forward".
+    Threads live in memory, so after a restart the strip honestly goes stale
+    and this returns 409.
+    """
+    agent = registry.get(body.agent)
+    if agent is None or agent.kind != "text":
+        raise HTTPException(404, f"no text agent '{body.agent}'")
+    cps = await runner.checkpoint_frame(agent, body.thread)
+    known = {c["checkpoint_id"] for c in (cps or {}).get("items", [])}
+    if body.checkpoint_id not in known:
+        raise HTTPException(
+            409, "that checkpoint is gone (threads do not survive a restart); "
+                 "watch the archived replay instead")
+    step = f"step {body.step}" if body.step >= 0 else "a saved checkpoint"
+    try:
+        meta = await stage.submit(
+            body.agent, "", source="replay", ip=_ip(request),
+            title=f"re-run from {step}",
+            thread=body.thread, checkpoint_id=body.checkpoint_id)
+    except stage.StageBusy as busy:
+        raise HTTPException(409, busy.message) from busy
+    return {"accepted": True, "run": meta}
+
+
+@app.get("/api/runs")
+def runs_list(limit: int = 30):
+    """Newest-first archive of everything that crossed the stage. All real."""
+    return {"runs": store.list_stage_runs(limit)}
+
+
+@app.get("/api/runs/latest")
+def runs_latest():
+    """The newest archived run whole, for the landing replay."""
+    run = store.latest_stage_run()
+    if run is None:
+        raise HTTPException(404, "no runs archived yet")
+    return run
+
+
+@app.get("/api/runs/{run_id}")
+def runs_get(run_id: int):
+    """One archived run with its full frame list, for replay."""
+    run = store.get_stage_run(run_id)
+    if run is None:
+        raise HTTPException(404, f"no stage run {run_id}")
+    return run
+
+
+@app.get("/api/stats")
+def stats():
+    """Real aggregates for the landing strip. Nothing here is synthetic."""
+    return {"stats": store.stage_stats(), "spend": spend.status(),
+            "autopilot": autopilot.status()}
 
 
 # ----------------------------------------------------------------- voice ----

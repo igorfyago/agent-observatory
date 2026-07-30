@@ -2,22 +2,71 @@
 
 The home for every non-trading agent · **agents you can watch think**.
 
-A multi-agent host: pick an agent from the top tab bar, ask it something, and
-watch its real graph light up node by node while every tool call it makes is
-shown live with its arguments, its result and how long it took.
+A multi-agent host that runs itself. Open the page and information is already
+flowing: the autopilot cycles curated scenarios through real LangGraph agents
+whenever the room has viewers, every browser watches the same shared stage
+over one SSE channel, and the moment the stage is idle the newest archived
+run replays so there is never a dead screen. Nobody has to think of a
+question to see the machine work; the composer is there for whoever wants to
+take the stage anyway.
 
 ```
-  +--------------------------------------------------------------+
-  | agent observatory   Pipeline Brief SQL Repo Research ...      |  top tab bar
-  +--------------------------+-----------------------------------+  = the picker
-  |                          |        * DAG lights up            |
-  |   chat / token stream    |        (drawn from the REAL       |
-  |                          |         compiled topology)        |
-  |                          +-----------------------------------+
-  |                          |  trace + every tool call:         |
-  |                          |  name · args · result · ms        |
-  +--------------------------+-----------------------------------+
+  +----------------------------------------------------------------+
+  | agent observatory        Pipeline Brief SQL Repo Research ...   |
+  +---------------------------+------------------------------------+
+  | feed: every run's tokens  |  LIVE · the DAG lights up           |
+  | (autopilot + visitors,    |  (drawn from the REAL compiled      |
+  |  same stage for everyone) |   topology, never hand-drawn)       |
+  |                           +------------------------------------+
+  | autopilot: next scenario  |  trace | state | checkpoints | x-ray|
+  | in 12s · [run now]        |  tools · reducers · time travel ·   |
+  | [ask your own question]   |  per-node design rationale          |
+  +---------------------------+--- runs · cost · tokens · median ---+
 ```
+
+## The stage and the autopilot
+
+One run at a time plays to every open browser (`GET /api/live`). The social
+contract: a visitor preempts the autopilot mid-run, nobody preempts a
+visitor. An empty room costs nothing: the autopilot only performs when at
+least one viewer is connected, every run passes the same spend guard as a
+visitor's, and a guard refusal backs the loop off exactly as long as the
+guard asked.
+
+Each scenario in `backend/autopilot.py` exists to light up one LangGraph
+mechanism, and says so on the ribbon while it runs:
+
+| scenario | mechanism on display |
+|----------|----------------------|
+| five roles, one graph | static-edge parallel fan-out, a join, a critic loop on `add_conditional_edges` |
+| the tool loop repairs itself | `create_agent` loop reading SQL errors and fixing its own query |
+| a loop inside a loop | an inner tool loop nested in an outer reflection loop |
+| the app explains its own source | retrieval as a tool, file citations over this repo |
+| structured output, no prose | `with_structured_output` forcing a Pydantic schema |
+| the flagship | `Command` router, three parallel sub-agents, critic gate, `interrupt()` |
+
+The SQL and research scenarios query the observatory's own run log, which the
+stage itself keeps appending to, so the questions stay fresh forever.
+
+## What the right rail proves
+
+- **trace**: every node with timing, every tool call with args, result and
+  ms, every model call with its token count and banked cost.
+- **state**: the per-node delta each superstep merged, with the channel's
+  reducer named (`overwrite` vs `append`): watch `operator.add` collect three
+  concurrent specialists without a collision.
+- **checkpoints**: the thread's saved supersteps from the checkpointer,
+  newest first, each with a "re-run from here" button. That button is
+  LangGraph time travel: input `None` plus a `checkpoint_id`, and the graph
+  re-executes forward from that saved state, live on the stage.
+- **x-ray**: click any node for the design defended in plain words: the
+  concept, the trade it makes, and the hard questions it should be asked.
+  Every agent also lists the exact framework surface it exercises.
+
+Interrupts are part of the show: when the analyst parks at its human gate,
+autopilot runs approve themselves after a visible countdown, and any viewer
+can beat the countdown with the approve/revise/reject buttons. Each run ends
+with a deep link to its LangSmith trace when tracing is configured.
 
 ## The hosted agents
 
@@ -55,21 +104,31 @@ that. Nothing else needs editing.
 ## How the live view works
 
 `backend/runner.py` is a single generic translator over LangGraph's
-`astream_events`. Because node and tool events are already first-class in the
-framework, every hosted agent gets live highlighting and tool inspection with
-zero observability boilerplate in the agent itself:
+`astream_events`. Because node, tool and model events are already first-class
+in the framework, every hosted agent gets live highlighting, state
+inspection and cost metering with zero observability boilerplate in the
+agent itself:
 
 | frame | from |
 |-------|------|
-| `node_start` / `node_end` | LangGraph chain events, filtered to real graph nodes |
+| `node_start` / `node_end` | LangGraph chain events, filtered to real graph nodes; `node_end` carries the state delta the node returned |
 | `token` | `on_chat_model_stream` |
 | `tool_start` | `on_tool_start`, carrying the call's arguments |
 | `tool_end` | `on_tool_end`, carrying the result and elapsed ms |
+| `usage` | `on_chat_model_end`, the call's tokens and cost as the spend meter banked them |
 | `route` | a custom event an agent dispatches for a conditional edge |
 | `interrupt` | the graph parked itself for human approval |
+| `checkpoints` | the thread's saved supersteps from `aget_state_history`, for the time-travel strip |
+| `trace_id` | the root run id, which is the LangSmith trace id when tracing is on |
 
 An agent that needs a frame the runner cannot infer dispatches a LangChain
 custom event named `obs` and it passes straight through.
+
+`backend/stage.py` fans those frames out to every viewer and records each
+finished run whole (meta + frames) into the `stage_runs` archive, which is
+what powers the landing replay, the recent-runs list and the stats strip.
+Nothing on that strip is synthetic: it is all real runs that crossed this
+stage.
 
 The DAG itself is rendered by `backend/static/layout.js`, a pure deterministic
 layered-graph layout, from the topology the backend reports. The picture is
@@ -142,10 +201,14 @@ See `.env.example` for the data dir, desk seam, admin token and spend caps.
 
 | endpoint | does |
 |----------|------|
-| `GET /api/agents` | the registry: every hosted agent, with graph topology |
+| `GET /api/live` | the one SSE stream every browser watches: hello, snapshot of the run in flight, then everything live |
+| `POST /api/chat` | put a question on the stage (202; frames arrive on /api/live) |
+| `POST /api/resume` | decide a parked interrupt: approve, revise, reject |
+| `POST /api/replay` | time travel: re-execute a thread from a saved checkpoint |
+| `GET /api/runs` (+`/{id}`, `/latest`) | the stage archive, whole runs with frames |
+| `GET /api/stats` | real aggregates: runs, cost, tokens, latency, autopilot state |
+| `GET /api/agents` | the registry: every hosted agent, topology, x-ray content |
 | `GET /api/graph?agent=` | one agent's compiled topology |
-| `POST /api/chat` | run a text agent, SSE frame stream |
-| `POST /api/resume` | resume an agent parked at a human-approval interrupt |
 | `GET /api/personas/{id}` | a voice persona's instructions, voice and tool schemas |
 | `POST /api/personas` | mint a custom voice agent (admin-token gated) |
 | `POST /api/tool/{id}` | server-side execution of a Realtime function call |

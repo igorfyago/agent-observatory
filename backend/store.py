@@ -67,6 +67,28 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     outcome TEXT NOT NULL            -- 'ok' | 'error' | 'timeout'
 );
 
+-- Every run that crossed the stage (autopilot or visitor), stored whole:
+-- the frame list is the run, so the UI can replay any of them exactly and
+-- the landing page always has something real to show. Real runs only, no
+-- synthetic rows in this table ever.
+CREATE TABLE IF NOT EXISTS stage_runs (
+    id INTEGER PRIMARY KEY,
+    started_at TEXT NOT NULL,        -- ISO-8601 UTC
+    agent_id TEXT NOT NULL,
+    source TEXT NOT NULL,            -- 'autopilot' | 'visitor' | 'replay'
+    title TEXT NOT NULL,             -- scenario title, or '' for visitor runs
+    question TEXT NOT NULL,
+    outcome TEXT NOT NULL,           -- 'ok' | 'error' | 'preempted' | 'interrupt'
+    latency_ms INTEGER NOT NULL,
+    tokens_in INTEGER NOT NULL,
+    tokens_out INTEGER NOT NULL,
+    cost_usd REAL NOT NULL,
+    tool_calls INTEGER NOT NULL,
+    thread_id TEXT NOT NULL,
+    trace_url TEXT NOT NULL,
+    frames TEXT NOT NULL             -- full frame list, JSON
+);
+
 -- Trade decisions POSTed by the desk (Marcus, the options voice agent).
 -- The raw record is kept whole in `payload` so the UI can replay the run
 -- exactly as it happened; the other columns are just the list view.
@@ -175,6 +197,141 @@ def log_run(agent_id: str, kind: str, question: str, tool_calls: int,
     )
     conn.commit()
     conn.close()
+
+
+# ------------------------------------------------------------ stage runs ----
+
+# Rolling window, same reasoning as desk_runs: the newest runs are the ones
+# people watch, and an unattended public box must not grow a disk problem.
+STAGE_RUNS_CAP = 400
+
+_STAGE_SUMMARY_COLS = ("id", "started_at", "agent_id", "source", "title",
+                       "question", "outcome", "latency_ms", "tokens_in",
+                       "tokens_out", "cost_usd", "tool_calls", "thread_id",
+                       "trace_url")
+
+
+def save_stage_run(meta: dict, frames: list) -> int:
+    """Store one finished stage run whole and return its id."""
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "INSERT INTO stage_runs (started_at, agent_id, source, title,"
+            " question, outcome, latency_ms, tokens_in, tokens_out, cost_usd,"
+            " tool_calls, thread_id, trace_url, frames)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                str(meta.get("started_at", "")),
+                str(meta.get("agent_id", "")),
+                str(meta.get("source", "visitor")),
+                str(meta.get("title", ""))[:200],
+                str(meta.get("question", ""))[:500],
+                str(meta.get("outcome", "ok")),
+                int(meta.get("latency_ms") or 0),
+                int(meta.get("tokens_in") or 0),
+                int(meta.get("tokens_out") or 0),
+                float(meta.get("cost_usd") or 0.0),
+                int(meta.get("tool_calls") or 0),
+                str(meta.get("thread_id", "")),
+                str(meta.get("trace_url", "")),
+                json.dumps(frames, separators=(",", ":"), default=str),
+            ),
+        )
+        run_id = cur.lastrowid
+        conn.execute(
+            "DELETE FROM stage_runs WHERE id NOT IN"
+            " (SELECT id FROM stage_runs ORDER BY id DESC LIMIT ?)",
+            (STAGE_RUNS_CAP,),
+        )
+        conn.commit()
+        return run_id
+    finally:
+        conn.close()
+
+
+def set_stage_trace(run_id: int, trace_url: str) -> None:
+    """The LangSmith URL arrives a moment after the run is saved."""
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE stage_runs SET trace_url = ? WHERE id = ?",
+                     (trace_url, run_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_stage_runs(limit: int = 30) -> list[dict]:
+    """Newest-first summaries, no frames: the list is light, a click loads one."""
+    limit = max(1, min(int(limit), 200))
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            f"SELECT {', '.join(_STAGE_SUMMARY_COLS)} FROM stage_runs"
+            " ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [dict(zip(_STAGE_SUMMARY_COLS, r)) for r in rows]
+
+
+def get_stage_run(run_id: int) -> dict | None:
+    """One archived run with its full frame list, or None."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            f"SELECT {', '.join(_STAGE_SUMMARY_COLS)}, frames FROM stage_runs"
+            " WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    out = dict(zip(_STAGE_SUMMARY_COLS, row[:-1]))
+    try:
+        out["frames"] = json.loads(row[-1])
+    except json.JSONDecodeError:
+        out["frames"] = []
+    return out
+
+
+def latest_stage_run() -> dict | None:
+    """The newest archived run, frames included, for the landing replay."""
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT id FROM stage_runs ORDER BY id DESC LIMIT 1"
+                           ).fetchone()
+    finally:
+        conn.close()
+    return get_stage_run(row[0]) if row else None
+
+
+def stage_stats() -> dict:
+    """Real aggregates for the landing strip, all from actual stage runs."""
+    conn = get_connection()
+    try:
+        today = conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(cost_usd),0), COALESCE(SUM(tool_calls),0),"
+            " COALESCE(SUM(tokens_in+tokens_out),0)"
+            " FROM stage_runs WHERE started_at >= date('now')",
+        ).fetchone()
+        total = conn.execute("SELECT COUNT(*) FROM stage_runs").fetchone()
+        med = conn.execute(
+            "SELECT latency_ms FROM stage_runs WHERE outcome='ok'"
+            " ORDER BY latency_ms LIMIT 1 OFFSET"
+            " (SELECT COUNT(*) FROM stage_runs WHERE outcome='ok') / 2",
+        ).fetchone()
+    finally:
+        conn.close()
+    return {
+        "runs_today": int(today[0]),
+        "cost_today_usd": round(float(today[1]), 4),
+        "tool_calls_today": int(today[2]),
+        "tokens_today": int(today[3]),
+        "runs_archived": int(total[0]),
+        "median_latency_ms": int(med[0]) if med else 0,
+    }
 
 
 # ------------------------------------------------------------- desk runs ----

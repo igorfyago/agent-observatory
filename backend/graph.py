@@ -41,13 +41,114 @@ class PipelineState(TypedDict, total=False):
 
 
 # Graph spec the frontend renders, kept next to the graph so they can't drift.
+# Each node carries its x-ray: the design defended in plain words, readable by
+# clicking the node while the run streams past it.
 GRAPH_SPEC = {
     "nodes": [
-        {"id": "supervisor", "label": "Supervisor", "role": "plans & delegates"},
-        {"id": "researcher", "label": "Researcher", "role": "gathers facts"},
-        {"id": "analyst",    "label": "Analyst",    "role": "weighs trade-offs"},
-        {"id": "writer",     "label": "Writer",     "role": "drafts answer"},
-        {"id": "critic",     "label": "Critic",     "role": "reviews & gates"},
+        {
+            "id": "supervisor", "label": "Supervisor", "role": "plans & delegates",
+            "xray": {
+                "concept": (
+                    "A planning node that writes the approach before any "
+                    "specialist spends tokens. It is a plain LangGraph node: a "
+                    "function that reads state and returns the piece it owns."),
+                "here": (
+                    "Writes `plan` into shared state. The two edges leaving it "
+                    "are both static add_edge calls, which is LangGraph's cue "
+                    "to run both targets in the same superstep, in parallel."),
+                "tradeoffs": (
+                    "A dedicated planner costs one extra model call per run. "
+                    "The alternative, letting each specialist improvise, saves "
+                    "that call but the specialists drift apart on hard "
+                    "questions."),
+                "questions": [
+                    "Why not let the model choose the team dynamically? Because this team is fixed, static edges are honest: the topology IS the org chart, and the picture cannot lie.",
+                    "What happens if the plan is bad? The critic gate catches the damage downstream and the revise loop pays the cost back, one bounded pass at a time.",
+                    "Where does parallelism come from? Two add_edge calls from one node: LangGraph runs all targets of a superstep together, no threads or queues in my code.",
+                ],
+            },
+        },
+        {
+            "id": "researcher", "label": "Researcher", "role": "gathers facts",
+            "xray": {
+                "concept": (
+                    "One of two specialists running concurrently in the same "
+                    "superstep. Each writes a different state key, so no "
+                    "reducer is needed and the writes cannot collide."),
+                "here": (
+                    "Streams its findings token by token (astream_events "
+                    "surfaces on_chat_model_stream) and returns `research`."),
+                "tradeoffs": (
+                    "Parallel specialists halve wall-clock latency but you "
+                    "give up any chance for the analyst to react to the "
+                    "research. This pair is independent by design, so the "
+                    "trade costs nothing here."),
+                "questions": [
+                    "How do parallel writes not clobber each other? Each branch owns a distinct key. Two writers on ONE key would need a reducer, like the analyst agent's analyses list.",
+                    "Why does the browser see tokens live? The runner listens to astream_events v2 and forwards every on_chat_model_stream chunk as an SSE frame.",
+                ],
+            },
+        },
+        {
+            "id": "analyst", "label": "Analyst", "role": "weighs trade-offs",
+            "xray": {
+                "concept": (
+                    "The second parallel specialist. Same superstep as the "
+                    "researcher, different state key, different system prompt."),
+                "here": "Returns `analysis`: the option space with a verdict.",
+                "tradeoffs": (
+                    "Splitting research from judgment is one more prompt to "
+                    "maintain, but each stays short and testable, and the "
+                    "writer gets two clean inputs instead of one muddled one."),
+                "questions": [
+                    "Is two specialists overkill for easy questions? Sometimes yes: that is exactly the case the Brief agent exists for, one call, no graph ceremony.",
+                ],
+            },
+        },
+        {
+            "id": "writer", "label": "Writer", "role": "drafts answer",
+            "xray": {
+                "concept": (
+                    "A join. LangGraph will not start this node until every "
+                    "incoming branch of the superstep has finished, which is "
+                    "the framework giving you a barrier for free."),
+                "here": (
+                    "Merges `research` and `analysis` into `draft`, and counts "
+                    "`revisions` so the critic loop stays bounded. On a revise "
+                    "pass it rewrites against the critique instead."),
+                "tradeoffs": (
+                    "A single writer keeps one voice in the answer. The cost "
+                    "is a second full pass whenever the critic bounces it, "
+                    "which is why revisions are capped."),
+                "questions": [
+                    "How does the join know to wait? Both researcher and analyst have add_edge into writer, so LangGraph only schedules writer when both upstream writes have landed.",
+                    "Why does the writer count revisions instead of the critic? The writer owns the draft lifecycle; the critic stays a pure judge, which keeps the gate honest.",
+                ],
+            },
+        },
+        {
+            "id": "critic", "label": "Critic", "role": "reviews & gates",
+            "xray": {
+                "concept": (
+                    "A quality gate on a conditional edge: "
+                    "add_conditional_edges reads the critic's verdict from "
+                    "state and routes to END or back to the writer. The loop "
+                    "in the picture is real control flow, not an illustration."),
+                "here": (
+                    "Sets `approved`, and the router sends `revise` back to "
+                    "the writer at most twice, then forces approval so the "
+                    "graph provably terminates."),
+                "tradeoffs": (
+                    "A critic that can reject work doubles the cost of a bad "
+                    "draft. The bound keeps the worst case priced in: three "
+                    "writer passes, never an unbounded argument."),
+                "questions": [
+                    "What stops an infinite revise loop? A hard cap on revisions checked in the routing function: past two passes the route is END no matter what the critic says.",
+                    "Why a conditional edge instead of the critic calling the writer directly? The route decision lives in the topology, so it is visible, testable and drawn in the DAG from the compiled graph.",
+                    "Could the critic be a cheaper model? Yes, judging is easier than writing, and a mixed-model team is one line per node with init_chat_model.",
+                ],
+            },
+        },
     ],
     "edges": [
         {"from": "supervisor", "to": "researcher"},
@@ -57,6 +158,32 @@ GRAPH_SPEC = {
         {"from": "writer",     "to": "critic"},
         {"from": "critic",     "to": "writer", "kind": "loop", "label": "revise"},
         {"from": "critic",     "to": "end",    "label": "approve"},
+    ],
+    # The state channels, as the inspector explains them while deltas land.
+    "state": [
+        {"key": "question",  "kind": "overwrite", "note": "the input, written once"},
+        {"key": "plan",      "kind": "overwrite", "note": "supervisor's approach"},
+        {"key": "research",  "kind": "overwrite", "note": "researcher's findings"},
+        {"key": "analysis",  "kind": "overwrite", "note": "analyst's verdict"},
+        {"key": "draft",     "kind": "overwrite", "note": "writer's latest pass"},
+        {"key": "critique",  "kind": "overwrite", "note": "critic's last review"},
+        {"key": "approved",  "kind": "overwrite", "note": "the gate's decision"},
+        {"key": "revisions", "kind": "overwrite", "note": "loop bound, counts writer passes"},
+    ],
+    # The LangGraph surface this graph actually exercises.
+    "framework": [
+        {"api": "StateGraph(PipelineState)",
+         "note": "typed shared state; every node returns only the keys it owns"},
+        {"api": "add_edge fan-out + join",
+         "note": "two edges out of supervisor run in one superstep; writer waits for both"},
+        {"api": "add_conditional_edges(critic, ...)",
+         "note": "the approve/revise gate lives in the topology, not in a prompt"},
+        {"api": "adispatch_custom_event('obs', ...)",
+         "note": "demo tokens and route decisions ride the same event stream as real ones"},
+        {"api": "astream_events v2",
+         "note": "one listener turns node, token and custom events into the SSE frames you are watching"},
+        {"api": "InMemorySaver checkpointer",
+         "note": "every superstep is saved, which is what the checkpoint strip and re-run buttons use"},
     ],
 }
 
@@ -285,7 +412,12 @@ def build_graph():
     g.add_conditional_edges(
         "critic", route_after_critic, {"revise": "writer", "approve": END}
     )
-    return g.compile()
+    # The checkpointer saves state at every superstep, which powers the
+    # checkpoint strip and the re-run-from-step buttons in the UI. In-memory
+    # is the right weight here: archived frame replays cover history across
+    # restarts, and threads themselves are throwaway performances.
+    from langgraph.checkpoint.memory import InMemorySaver
+    return g.compile(checkpointer=InMemorySaver())
 
 
 # --------------------------------------------------------------------------- #
