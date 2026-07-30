@@ -84,6 +84,17 @@
   .bubble.answer { border-color: rgba(88,166,255,.45); background: linear-gradient(180deg, var(--accent-soft), var(--panel)); }
   .bubble.err { border-color: rgba(248,81,73,.5); }
   .bubble.err .who .dot { background: var(--red); }
+  /* Once a run ends, superseded pass blocks fold to their label. The final
+     answer is the signal; the working is one click away, not on the screen. */
+  details.fold { max-width: 94%; }
+  details.fold > summary {
+    cursor: pointer; list-style: none; font-family: var(--mono); font-size: 10px;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--dim);
+    padding: 2px 12px; border-left: 2px solid var(--line);
+  }
+  details.fold > summary::before { content: "\25B8  "; }
+  details.fold[open] > summary::before { content: "\25BE  "; }
+  details.fold > .bubble { margin-top: 4px; animation: none; }
   .caret { display: inline-block; width: 7px; height: 13px; background: var(--accent); vertical-align: -2px; animation: pulse .8s infinite; }
   @keyframes pulse { 50% { opacity: .25; } }
 
@@ -507,6 +518,9 @@
 <script>
 const $ = (s) => document.querySelector(s);
 const messages = $("#messages"), trows = $("#trows");
+let runBubbles = [];                      // this run's feed bubbles, in order
+let gateBubble = null;                    // interrupt memo; survives the resume's
+                                          // runBubbles reset, folds at run end
 
 /* ------------------------------------------------------------------ state */
 let AGENTS = [], SPECS = {};              // registry
@@ -700,6 +714,7 @@ function markLiveTab(agentId) {
 function prepareRun(meta) {
   replaySeq++; REPLAYING = false;     // live always wins over a replay
   RUN = meta; RUN_AGENT = meta.agent_id;
+  runBubbles = [];
   resetRunViews();
   followStage(meta.agent_id);
   setPill("live");
@@ -767,6 +782,7 @@ function onNodeStart(ev) {
     `<span class="txt"></span><span class="caret"></span>`;
   messages.appendChild(b); scrollChat();
   bubbles[id] = b;
+  runBubbles.push(b);
 
   const row = el("div", "trow active");
   row.innerHTML = `<span class="st">&#9654;</span><span>${escapeHtml(id)}${rev}</span>
@@ -886,6 +902,9 @@ function onInterrupt(ev) {
   const memo = ev.payload?.memo ?? ev.payload;
   const b = addBubble("approval gate · interrupt()", "", "answer");
   b.appendChild(memoEl(memo));
+  b._raw = "gate";                 // folds with the passes once the run ends
+  runBubbles.push(b);
+  gateBubble = b;
   scrollChat();
   setPill("idle");
   $("#stageTxt").innerHTML =
@@ -942,11 +961,61 @@ function showApprove(p) {
 function onRunEnd(ev) {
   document.getElementById("endcap")?.classList.add("done");
   if (ev.note) { addBubble("observatory", ev.note); return; }
-  const b = addBubble("final answer", "", "answer");
-  const body = el("div", "md");
-  body.innerHTML = ObsMd.render(ev.answer || "(empty)");
-  b.appendChild(body);
+  // One signal, not two. Most agents' last streamed bubble IS the final
+  // answer, and printing the same text twice doubled every run on the feed.
+  // When they match, promote the streamed bubble in place instead.
+  const squash = (s) => String(s || "").replace(/\s+/g, " ").trim();
+  const last = messages.querySelector(".bubble:last-child");
+  let fin = null;
+  if (last && last._raw && squash(last._raw) === squash(ev.answer)) {
+    last.classList.add("answer");
+    const who = last.querySelector(".who");
+    if (who) who.innerHTML = `<span class="dot"></span>final answer`;
+    fin = last;
+  } else {
+    fin = addBubble("final answer", "", "answer");
+    // A structured agent's answer is a typed object. Raw JSON braces on the
+    // feed are for machines; lay it out as the memo document instead.
+    const memo = parseMemo(ev.answer);
+    if (memo) {
+      fin.appendChild(memoEl(memo.obj));
+      if (memo.rest) fin.appendChild(el("div", "mk", memo.rest));
+    } else {
+      const body = el("div", "md");
+      body.innerHTML = ObsMd.render(ev.answer || "(empty)");
+      fin.appendChild(body);
+    }
+  }
+  foldPasses(fin);
   scrollChat();
+}
+
+function parseMemo(answer) {
+  const s = String(answer || "").trim();
+  if (!s.startsWith("{")) return null;
+  const end = s.lastIndexOf("}");
+  if (end < 0) return null;
+  try {
+    const obj = JSON.parse(s.slice(0, end + 1));
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
+    return { obj, rest: s.slice(end + 1).trim() };
+  } catch { return null; }
+}
+
+/* The live show streams every pass; the record keeps only the answer open.
+   Everything superseded folds to its label, one click to reopen. */
+function foldPasses(fin) {
+  if (gateBubble && !runBubbles.includes(gateBubble)) runBubbles.push(gateBubble);
+  gateBubble = null;
+  for (const rb of runBubbles) {
+    if (rb === fin || !rb.isConnected || !(rb._raw || "").trim()) continue;
+    const label = rb.querySelector(".who")?.textContent?.trim() || "pass";
+    const d = el("details", "fold");
+    d.innerHTML = `<summary>${escapeHtml(label)}</summary>`;
+    rb.replaceWith(d);
+    d.appendChild(rb);
+  }
+  runBubbles = [];
 }
 
 function onTrace(ev) {

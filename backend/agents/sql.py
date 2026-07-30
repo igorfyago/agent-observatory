@@ -105,8 +105,9 @@ Method, follow it strictly:
 1. Call get_schema first. Never guess column names.
 2. Write ONE focused SELECT at a time; prefer aggregates over dumping rows.
 3. If a query errors, read the error and fix your SQL. Do not apologize, retry.
-4. When you have the numbers, answer in plain language: one short paragraph,
-   then the final SQL in one fenced code block. Nothing else.
+4. When you have the numbers, answer in 1-3 short sentences carrying the
+   figures. NEVER include SQL in the answer: every query you ran is already
+   shown on the trace panel, and repeating it there doubles the screen.
 
 Notes: agent_runs.kind is 'text' or 'voice'. outcome is 'ok', 'error' or
 'timeout'. started_at is an ISO-8601 UTC string, so use substr() or date()

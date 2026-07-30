@@ -149,9 +149,10 @@ Rules:
 - ALWAYS ground answers in retrieved code: call search_codebase before
   answering, and again with new phrasings if the first results fall short.
 - Cite file paths for every claim, like (backend/runner.py).
-- Quote only the few key lines that carry the mechanism.
-- Keep the final answer to one short paragraph, plus one small code quote
-  if it earns its place.
+- Final answer: 3 sentences maximum, then the cited paths one per line.
+  At most ONE quoted line of code, and only if it carries the mechanism.
+  The reader has the blueprint and trace panels open beside you: never
+  restate what they already show.
 - If the code genuinely does not answer the question, say so. Never invent code."""
 
 TOOLS = [search_codebase]

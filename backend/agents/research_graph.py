@@ -215,10 +215,11 @@ def build():
     async def plan_node(state: ResearchState) -> dict:
         plan = (await model.ainvoke([
             SystemMessage(
-                "You are a research lead. Write a numbered 3-5 step data-gathering "
-                "plan for the question. Steps must map to available tools: live desk "
-                "positioning snapshots, wall maps, news, TA signals, SQL over the "
-                "observatory run log, and a calculator. No prose beyond the steps."),
+                "You are a research lead. Write a numbered 3-4 step data-gathering "
+                "plan for the question, each step UNDER TEN WORDS. Steps must map "
+                "to available tools: live desk positioning snapshots, wall maps, "
+                "news, TA signals, SQL over the observatory run log, and a "
+                "calculator. No prose beyond the steps."),
             HumanMessage(state["question"]),
         ])).content
         return {"plan": plan, "messages": [
@@ -226,6 +227,8 @@ def build():
                 "You are a quant researcher. Execute the plan step by step using "
                 "tools. Gather ALL numbers before concluding. If a tool reports the "
                 "desk is unavailable, say so plainly and never invent a figure. "
+                "Work quietly: no prose around tool calls, and when you conclude, "
+                "state the findings in at most 5 short lines. "
                 "Plan:\n" + plan),
             HumanMessage(state["question"]),
         ]}
@@ -238,10 +241,10 @@ def build():
 
     async def draft_node(state: ResearchState) -> dict:
         draft = (await model.ainvoke(state["messages"] + [
-            HumanMessage("Write the research answer now: direct thesis first, then the "
-                         "supporting numbers you gathered, then risks and caveats. "
-                         "Cite figures explicitly, no vague claims. One short "
-                         "paragraph.")
+            HumanMessage("Write the research answer now, FOUR SENTENCES MAXIMUM: "
+                         "thesis first, then the key numbers you gathered, then the "
+                         "one risk that matters. Cite figures explicitly, no vague "
+                         "claims.")
         ])).content
         return {"draft": draft}
 
