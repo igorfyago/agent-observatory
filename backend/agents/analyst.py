@@ -53,205 +53,81 @@ SPEC = {
         {
             "id": "fetch", "label": "Fetch", "role": "desk data, no model",
             "xray": {
-                "concept": (
-                    "A Command router: the node returns Command(update=..., "
-                    "goto=...), writing state AND choosing the branch in one "
-                    "move. No model involved; the routing key is data."),
-                "here": (
-                    "One HTTP call to the trading desk. Positive gamma "
-                    "regime routes to the long_gamma playbook, negative to "
-                    "short_gamma, desk unreachable to no_data."),
-                "tradeoffs": (
-                    "Command couples a node to its destinations, which costs "
-                    "some of add_conditional_edges' separation. When update "
-                    "and route derive from the same fetch, one atomic return "
-                    "is clearer than two coordinated functions."),
-                "questions": [
-                    "Why route on data instead of asking the model? The regime is a fact in the snapshot, not a judgment; spending tokens to rediscover a field would add latency and a failure mode.",
-                    "What does the third branch buy? Honesty when the desk is down: the run continues, states plainly that live data is missing, and invents nothing.",
-                ],
+                "gotcha": "Command(update, goto): write state AND pick the branch in one return. Routing on data, zero tokens spent.",
+                "q": ["Desk down? Third branch. The run continues and says so, invents nothing."],
             },
         },
         {
             "id": "long_gamma", "label": "Long gamma", "role": "playbook",
             "xray": {
-                "concept": (
-                    "A playbook node: deterministic, writes the regime's "
-                    "trading doctrine into state as text the specialists "
-                    "must obey."),
-                "here": "Dealers long gamma: mean reversion, ranges, pinning.",
-                "tradeoffs": (
-                    "Doctrine in state instead of in each prompt means one "
-                    "place to edit and an audit trail of exactly what the "
-                    "specialists were told this run."),
-                "questions": [
-                    "Why three nodes instead of one playbook function? So the DAG shows which doctrine fired: the lit branch is the routing decision, readable from across the room.",
-                ],
+                "gotcha": "Doctrine as a node so the DAG shows which regime fired. The lit branch IS the routing decision.",
+                "q": [],
             },
         },
         {
             "id": "short_gamma", "label": "Short gamma", "role": "playbook",
             "xray": {
-                "concept": "Same mechanism as long_gamma, opposite doctrine.",
-                "here": "Dealers short gamma: momentum, breakouts, wider stops.",
-                "tradeoffs": "See long_gamma: one doctrine per node, visibly routed.",
-                "questions": [
-                    "Could the playbooks be a lookup instead of nodes? Functionally yes; visibly no. The branch in the picture is the point: routing you can see beats routing you must infer.",
-                ],
+                "gotcha": "Same mechanism, opposite doctrine: momentum, breakouts, wider stops.",
+                "q": [],
             },
         },
         {
             "id": "no_data", "label": "No data", "role": "desk offline",
             "xray": {
-                "concept": (
-                    "The degraded-mode branch, designed on the same footing "
-                    "as the happy paths instead of bolted on as error "
-                    "handling."),
-                "here": (
-                    "Instructs every specialist to reason from first "
-                    "principles and mark live positioning unavailable in "
-                    "every bullet."),
-                "tradeoffs": (
-                    "A run without data still costs model calls. The "
-                    "alternative, failing the run, teaches viewers nothing; "
-                    "an honest degraded answer still demonstrates the "
-                    "machine."),
-                "questions": [
-                    "Why run at all without data? Because the failure mode is the demonstration: the memo that says 'unavailable' in every bullet is proof the agents do not fabricate.",
-                ],
+                "gotcha": "Degraded mode as a first-class branch. A memo saying 'unavailable' in every bullet is proof the agents do not fabricate.",
+                "q": [],
             },
         },
         {
             "id": "positioning", "label": "Positioning", "role": "specialist",
             "xray": {
-                "concept": (
-                    "A sub-agent as a node: create_agent builds a full tool "
-                    "loop (its own model turns, its own toolbelt), and the "
-                    "outer graph runs it as one step. A graph inside a "
-                    "graph."),
-                "here": (
-                    "Reads the GEX/DEX profile with SQL and sigma_move "
-                    "tools; runs concurrently with flow and risk in the "
-                    "same superstep."),
-                "tradeoffs": (
-                    "Sub-agents multiply model calls (three loops instead "
-                    "of three prompts) and buy real division of labor: each "
-                    "specialist iterates its own tools without stepping on "
-                    "the others' context."),
-                "questions": [
-                    "How do three agents run at once? All three playbook edges land on all three specialists, so LangGraph schedules them in one superstep; the join waits for all.",
-                    "How do their outputs merge without clobbering? The analyses channel is Annotated[list, operator.add]: a reducer appends concurrent writes instead of last-write-wins.",
-                ],
+                "gotcha": "A create_agent sub-agent running as a node: a graph inside the graph, with its own tool loop.",
+                "q": ["Three at once? All playbook edges land on all three, one superstep, join waits."],
             },
         },
         {
             "id": "flow", "label": "Flow", "role": "specialist",
             "xray": {
-                "concept": "Second parallel sub-agent, same pattern as positioning.",
-                "here": "Maps walls and OI concentration against the expected-move band.",
-                "tradeoffs": "Same as positioning: paid in calls, repaid in focus.",
-                "questions": [
-                    "Why not one specialist with all the tools? Three narrow prompts beat one broad one on discipline: each agent's loop stays short, cheap and on-topic.",
-                ],
+                "gotcha": "Second parallel sub-agent. Three narrow prompts beat one broad one on discipline.",
+                "q": [],
             },
         },
         {
             "id": "risk", "label": "Risk", "role": "specialist",
             "xray": {
-                "concept": "Third parallel sub-agent; the only one holding the pricing tool.",
-                "here": "Prices candidate structures with Black-Scholes and stresses the thesis.",
-                "tradeoffs": (
-                    "Giving only this agent option_quote is deliberate tool "
-                    "scoping: capability boundaries double as role "
-                    "boundaries."),
-                "questions": [
-                    "Why does tool scoping matter? An agent's toolbelt is its permission set: narrow belts make behavior predictable and reviews of what-can-touch-what possible.",
-                ],
+                "gotcha": "Only this one holds the pricing tool. A toolbelt is a permission set: scoping tools scopes the role.",
+                "q": [],
             },
         },
         {
             "id": "synthesize", "label": "Synthesize", "role": "head of desk",
             "quiet": True,
             "xray": {
-                "concept": (
-                    "The join and the decision point: waits for all three "
-                    "specialists, then forces the merged view into a typed "
-                    "Memo via with_structured_output."),
-                "here": (
-                    "Resolves disagreements explicitly; on a critique round "
-                    "it rewrites against the risk manager's exact objection."),
-                "tradeoffs": (
-                    "A typed memo (bias, conviction, invalidation) is harder "
-                    "to write than prose and infinitely easier to gate, "
-                    "store and render. Structure at the boundary pays "
-                    "everywhere downstream."),
-                "questions": [
-                    "What enforces the memo's shape? A Pydantic schema through with_structured_output: conviction is an int 1 to 10 by construction, not by hope.",
-                    "How does the join behave if one specialist fails? The superstep fails loudly rather than synthesizing from two thirds of a desk; partial teams produce confident holes.",
-                ],
+                "gotcha": "The join, then with_structured_output(Memo): conviction is an int 1-10 by construction, not by hope.",
+                "q": ["Concurrent writes? analyses uses operator.add: appends, never last-write-wins."],
             },
         },
         {
             "id": "risk_review", "label": "Risk review", "role": "critic gate",
             "quiet": True,
             "xray": {
-                "concept": (
-                    "A machine critic ahead of the human: structured verdict, "
-                    "conditional edge back to synthesize on rejection, "
-                    "bounded rounds."),
-                "here": (
-                    "Rejects memos that contradict the playbook, ignore a "
-                    "wall, or state figures absent from the analyses."),
-                "tradeoffs": (
-                    "Every rejection is a full synthesize pass. The bound "
-                    "(two rounds) caps the bill; after that the human sees "
-                    "the memo with the critique attached, which is its own "
-                    "kind of honesty."),
-                "questions": [
-                    "Why gate before the human instead of after? Machine review is cheap and instant; spending it first means the human's attention, the scarcest input, only sees filtered work.",
-                ],
+                "gotcha": "Machine critic BEFORE the human, so the scarcest input, human attention, only sees filtered work.",
+                "q": ["Rejection loop? Bounded at 2 rounds, then the human sees memo + critique."],
             },
         },
         {
             "id": "human", "label": "Human", "role": "approval pause",
             "xray": {
-                "concept": (
-                    "interrupt(): the graph checkpoints itself and stops "
-                    "cold. Resume arrives later as Command(resume=...), on a "
-                    "different request, and the run continues as if no time "
-                    "had passed. This is durable execution, not a sleep()."),
-                "here": (
-                    "Surfaces the memo and waits. Approve goes to publish; "
-                    "revise re-enters synthesize with notes; reject ends the "
-                    "run. On autopilot runs the observatory approves after a "
-                    "countdown unless a viewer decides first."),
-                "tradeoffs": (
-                    "A pause needs a checkpointer and a resume channel, "
-                    "which is real machinery. The alternative, side effects "
-                    "without a gate, is how agents end up publishing what "
-                    "nobody meant to ship."),
-                "questions": [
-                    "What exactly survives the pause? The whole thread state at the interrupt, held by the checkpointer under the thread id; resume rehydrates it and applies the decision.",
-                    "Why does interrupt() come first in the node? Everything before an interrupt re-runs on resume; putting it first makes the node idempotent by construction.",
-                    "What if two people resume the same pause? The stage tracks the pending interrupt and only the first decision is submitted; the second gets a clean 'nothing pending'.",
-                ],
+                "gotcha": "interrupt() checkpoints the graph and stops cold. Resume arrives on a DIFFERENT request as Command(resume=...). Durable execution, not sleep().",
+                "q": ["Why interrupt() first in the node? Everything before it re-runs on resume. First = idempotent by construction.",
+                      "Two people approve? First decision wins, the second gets a clean 'nothing pending'."],
             },
         },
         {
             "id": "publish", "label": "Publish", "role": "writes the memo",
             "xray": {
-                "concept": (
-                    "The side effect, placed strictly after the approval "
-                    "gate so it runs exactly once, never on a replayed "
-                    "prefix."),
-                "here": "Writes the memo JSON into the observatory's data dir.",
-                "tradeoffs": (
-                    "Files after gates is a discipline, not a framework "
-                    "feature: LangGraph guarantees the ordering, the design "
-                    "has to choose it."),
-                "questions": [
-                    "Why is the write not inside the human node? Resume re-runs the interrupting node's prefix; a write before the interrupt could execute twice. After the gate, it cannot.",
-                ],
+                "gotcha": "The side effect sits strictly AFTER the gate, so it runs exactly once, never on a replayed prefix.",
+                "q": [],
             },
         },
     ],
@@ -274,32 +150,25 @@ SPEC = {
     ],
     "state": [
         {"key": "ticker",    "kind": "overwrite", "note": "the input"},
-        {"key": "snapshot",  "kind": "overwrite", "note": "desk positioning, or empty offline"},
-        {"key": "walls",     "kind": "overwrite", "note": "call/put walls from the desk"},
-        {"key": "headlines", "kind": "overwrite", "note": "news context, clipped"},
-        {"key": "playbook",  "kind": "overwrite", "note": "the doctrine the router picked"},
+        {"key": "snapshot",  "kind": "overwrite", "note": "desk positioning"},
+        {"key": "walls",     "kind": "overwrite", "note": "call/put walls"},
+        {"key": "headlines", "kind": "overwrite", "note": "news, clipped"},
+        {"key": "playbook",  "kind": "overwrite", "note": "doctrine the router picked"},
         {"key": "analyses",  "kind": "append",
-         "note": "operator.add reducer: three concurrent specialists append without clobbering"},
-        {"key": "memo",      "kind": "overwrite", "note": "the typed Memo, latest round"},
-        {"key": "critique",  "kind": "overwrite", "note": "empty means the gate passed"},
+         "note": "add reducer: three specialists append concurrently"},
+        {"key": "memo",      "kind": "overwrite", "note": "typed Memo, latest round"},
+        {"key": "critique",  "kind": "overwrite", "note": "empty = gate passed"},
         {"key": "rounds",    "kind": "overwrite", "note": "critique loop bound"},
-        {"key": "published_path", "kind": "overwrite", "note": "set only after approval"},
+        {"key": "published_path", "kind": "overwrite", "note": "set after approval"},
     ],
     "framework": [
-        {"api": "Command(update=..., goto=...)",
-         "note": "the fetch node writes state and routes in one atomic return"},
-        {"api": "parallel sub-agents via create_agent",
-         "note": "three full tool-loop agents run as nodes in one superstep: graphs inside the graph"},
-        {"api": "add_edge([...], 'synthesize') join",
-         "note": "the list-edge is the barrier: synthesis waits for all three specialists"},
-        {"api": "Annotated[list, operator.add]",
-         "note": "the analyses channel merges concurrent writes by appending, the reducer idea in one line"},
-        {"api": "with_structured_output(Memo / Review)",
-         "note": "typed memo out of synthesis, typed verdict out of the gate"},
-        {"api": "interrupt() + Command(resume=...)",
-         "note": "the human pause: checkpointed stop, resumed on a later request with the decision"},
-        {"api": "InMemorySaver checkpointer",
-         "note": "what makes the pause durable and the checkpoint strip real"},
+        {"api": "Command(update, goto)", "note": "state + route in one return"},
+        {"api": "create_agent sub-agents", "note": "graphs inside the graph, in parallel"},
+        {"api": "add_edge([...], join)", "note": "the list-edge is the barrier"},
+        {"api": "operator.add reducer", "note": "concurrent writes append"},
+        {"api": "with_structured_output", "note": "typed memo, typed verdict"},
+        {"api": "interrupt() + resume", "note": "durable human pause"},
+        {"api": "InMemorySaver", "note": "checkpoint per superstep"},
     ],
 }
 

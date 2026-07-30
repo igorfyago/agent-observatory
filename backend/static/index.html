@@ -593,22 +593,46 @@ function renderView(id, keepRunState) {
 
 function userSelect(id) {
   composeTarget = id;
-  if (RUN && id !== RUN_AGENT) {
-    browsing = true;
-    $("#browseBack").classList.add("show");
-  } else {
-    browsing = false;
-    $("#browseBack").classList.remove("show");
-    if (RUN) composeTarget = null;      // back on the live agent: follow again
+  const a = agentOf(id);
+  if (a && a.kind !== "text") { browsing = true; renderView(id, false); return; }
+  if (RUN && id === RUN.agent_id) {
+    // Back on the live agent: reattach to the stage stream from its start.
+    exitBrowse();
+    return;
   }
-  renderView(id, true);
+  // Any other tab is a self-contained demo: this agent's newest recorded run
+  // replays immediately, so every click resets to something specific.
+  browsing = true;
+  $("#browseBack").classList.add("show");
+  replayAgentDemo(id);
 }
 
-$("#browseBack").addEventListener("click", () => {
+async function replayAgentDemo(agentId) {
+  let latest = null;
+  try {
+    const list = (await (await fetch(`/api/runs?agent=${agentId}&limit=1`)).json()).runs || [];
+    if (list.length) latest = await (await fetch("/api/runs/" + list[0].id)).json();
+  } catch { /* fall through to the empty view */ }
+  if (!browsing) return;                 // user moved on mid-fetch
+  if (latest) { replayArchived(latest); return; }
+  replaySeq++; REPLAYING = false;
+  RUN_AGENT = agentId;
+  resetRunViews();
+  renderView(agentId, false);
+  setPill("idle");
+  $("#stageTxt").textContent = "no recorded run yet · the autopilot will visit";
+}
+
+function exitBrowse() {
   browsing = false;
   $("#browseBack").classList.remove("show");
-  if (RUN_AGENT) renderView(RUN_AGENT, true);
-});
+  replaySeq++; REPLAYING = false;
+  // Reconnect: the server replies with hello plus the live run's frames so
+  // far, which rebuilds exactly the state this browser missed while away.
+  reconnectLive();
+}
+
+$("#browseBack").addEventListener("click", exitBrowse);
 
 function followStage(agentId) {
   const tab = document.querySelector(`.tab-btn[data-id="${agentId}"]`);
@@ -626,30 +650,51 @@ function updateTargetLabel() {
 }
 
 /* ----------------------------------------------------------- live channel */
+let ES = null;
+// While browsing another agent's demo, live run frames stay out of the view:
+// only chrome (status, stats, links) passes. Returning reconnects for a
+// full snapshot, so nothing is ever half-merged.
+const CHROME_FRAMES = new Set(["hello", "stage", "autopilot", "trace", "ping", "trace_id"]);
+
 function connectLive() {
-  const es = new EventSource("/api/live");
-  es.onmessage = (e) => {
+  ES = new EventSource("/api/live");
+  ES.onmessage = (e) => {
     let ev;
     try { ev = JSON.parse(e.data); } catch { return; }
+    if (browsing && !CHROME_FRAMES.has(ev.type)) return;
     HANDLERS[ev.type]?.(ev);
   };
   // EventSource reconnects on its own; the server re-sends hello + snapshot.
+}
+
+function reconnectLive() {
+  try { ES?.close(); } catch { /* already closed */ }
+  connectLive();
 }
 
 /* -------------------------------------------------------------- handlers */
 function onHello(ev) {
   setMode(ev.mode || {});
   if (ev.stats) renderStats(ev.stats, ev.spend);
+  if (browsing) {                     // reconnect mid-browse: chrome only
+    if (ev.stage) markLiveTab(ev.stage.agent_id);
+    return;
+  }
   if (ev.stage) {
     // A run is mid-flight: the buffered frames that follow rebuild it.
     prepareRun(ev.stage);
   } else {
     RUN = null; RUN_AGENT = null;
     setPill("idle");
-    $("#stageTxt").textContent = "stage idle";
+    $("#stageTxt").textContent = "idle";
     loadLatestReplay();               // never a dead screen on arrival
   }
   if (ev.pending_interrupt) showApprove(ev.pending_interrupt);
+}
+
+function markLiveTab(agentId) {
+  document.querySelectorAll(".tab-btn").forEach((b) =>
+    b.classList.toggle("live-here", b.dataset.id === agentId));
 }
 
 function prepareRun(meta) {
@@ -667,20 +712,25 @@ function prepareRun(meta) {
 }
 
 function onStage(ev) {
-  if (ev.state === "running") { prepareRun(ev); return; }
+  if (ev.state === "running") {
+    if (browsing) { RUN = ev; markLiveTab(ev.agent_id); return; }
+    prepareRun(ev);
+    return;
+  }
   if (ev.state === "idle") {
-    RUN = null; RUN_AGENT = null;
+    RUN = null;
+    if (ev.stats) renderStats(ev.stats, ev.spend);
+    if (browsing) return;
+    RUN_AGENT = null;
     document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("live-here"));
     setPill("idle");
-    if (ev.stats) renderStats(ev.stats, ev.spend);
-    $("#stageTxt").textContent = "stage idle · autopilot lining up the next run";
+    $("#stageTxt").textContent = "idle";
   }
 }
 
 function onRunStart(ev) {
   setMode(ev.mode || {});
-  if (ev.replay_from) addBubble("observatory",
-    "re-running this thread from a saved checkpoint: everything before it is replayed state, everything after is fresh execution", "answer");
+  if (ev.replay_from) addBubble("observatory", "re-running from a saved checkpoint");
 }
 
 function setPill(kind) {
@@ -692,10 +742,8 @@ function setPill(kind) {
 function addRunCard(meta) {
   const cls = meta.source === "autopilot" ? " autopilot" : meta.source === "replay" ? " replay" : "";
   const card = el("div", "runcard" + cls);
-  const what = meta.title ? `${escapeHtml(meta.title)}` : "visitor question";
-  card.innerHTML = `<div class="t">${what}</div>` +
-    `${escapeHtml(meta.agent_id)} · ${escapeHtml(meta.source)}` +
-    (meta.question && meta.source !== "visitor" ? `<br>“${escapeHtml(meta.question)}”` : "");
+  card.innerHTML = `<div class="t">${escapeHtml(meta.title || meta.question || "")}</div>` +
+    `${escapeHtml(meta.agent_id)} · ${escapeHtml(meta.source)}`;
   messages.appendChild(card); scrollChat();
 }
 
@@ -958,17 +1006,17 @@ function renderRibbon() {
   now.classList.add("hide");
   dot.className = "dotp";
   if (!s.enabled) { dot.classList.add("idle"); txt.textContent = "autopilot off · the composer below is all yours"; return; }
-  const rung = s.level ? `level ${s.level} of ${s.ladder_top || 6} · ` : "";
+  const rung = s.level ? `L${s.level} · ` : "";
   if (s.state === "countdown") {
     const left = Math.max(0, Math.ceil((s.next_at || 0) - Date.now() / 1000));
-    txt.innerHTML = `next: ${rung}<b>${escapeHtml(s.title || "")}</b> on ${escapeHtml(s.agent || "")} in ${left}s · ${escapeHtml(s.shows || "")}`;
+    txt.innerHTML = `next: ${rung}<b>${escapeHtml(s.title || "")}</b> · ${left}s`;
     now.classList.remove("hide");
   } else if (s.state === "running") {
-    txt.innerHTML = `running ${rung}<b>${escapeHtml(s.title || "")}</b> · ${escapeHtml(s.shows || "")}`;
+    txt.innerHTML = `${rung}<b>${escapeHtml(s.title || "")}</b>`;
   } else if (s.state === "resting") {
-    txt.textContent = "autopilot resting: the spend guard asked for a pause";
+    txt.textContent = "paused by the spend guard";
   } else if (s.state === "empty_room") {
-    txt.textContent = "autopilot ready · runs start when the room has viewers";
+    txt.textContent = "waiting for a viewer";
   } else if (s.state === "off") {
     dot.classList.add("idle"); txt.textContent = "autopilot off";
   } else {
@@ -1062,12 +1110,11 @@ function renderStatePanel() {
   if (!keys.length) {
     const declared = Object.values(meta);
     panel.innerHTML = declared.length
-      ? `<div class="shint">the state channels this graph declares; values land here live as each node returns its update</div>`
-        + declared.map((s) =>
+      ? declared.map((s) =>
           `<div class="skey"><span class="k">${escapeHtml(s.key)}</span>` +
           `<span class="r ${s.kind === "append" ? "append" : ""}">${escapeHtml(s.kind)}</span>` +
           `<span class="v wb">${escapeHtml(s.note || "")}</span></div>`).join("")
-      : `<div class="shint">no state declared for this view</div>`;
+      : `<div class="shint">no state channels declared</div>`;
     return;
   }
   panel.innerHTML = keys.map((k) => {
@@ -1083,7 +1130,7 @@ function renderStatePanel() {
 function renderCkpts() {
   const panel = $("#ckptPanel");
   if (!ckpts || !(ckpts.items || []).length) {
-    panel.innerHTML = `<div class="shint">every superstep of a run is saved by the checkpointer; when a run finishes, its checkpoints appear here and any step can be re-executed. That is LangGraph time travel, live on this page.</div>`;
+    panel.innerHTML = `<div class="shint">checkpoints appear when a run finishes · any step can re-execute</div>`;
     return;
   }
   const rows = ckpts.items.map((c) => {
@@ -1094,7 +1141,7 @@ function renderCkpts() {
       `<button data-ckpt="${escapeHtml(c.checkpoint_id)}" data-step="${c.step}">re-run from here</button></div>`;
   }).join("");
   panel.innerHTML =
-    `<div class="shint">thread ${escapeHtml(ckpts.thread)} · newest first · re-running re-executes forward from that saved state</div>` + rows;
+    `<div class="shint">newest first</div>` + rows;
   panel.querySelectorAll("button[data-ckpt]").forEach((b) => b.addEventListener("click", async () => {
     const r = await fetch("/api/replay", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -1126,14 +1173,12 @@ function wireNodeClicks() {
 function ladderHtml() {
   const rungs = AGENTS.filter((a) => a.kind === "text" && a.level)
     .sort((a, b) => a.level - b.level);
-  const liveId = RUN_AGENT || null;
-  return `<div class="xcard" style="margin-bottom:10px"><h3>the ladder</h3>` +
-    `<p>${rungs.length} arrangements, simplest first. The autopilot climbs one rung per run, so staying for a full cycle means watching agent architecture grow. Click a rung to read its graph.</p></div>` +
-    rungs.map((a) =>
-      `<div class="rung${a.id === liveId ? " here" : ""}" data-agent="${escapeHtml(a.id)}">` +
-      `<span class="ln">${a.level}</span>` +
-      `<span class="nm">${escapeHtml(a.label)}<small>${escapeHtml(a.arrangement)}</small></span>` +
-      `<span class="why">${escapeHtml(a.tagline)}</span></div>`).join("");
+  const liveId = (RUN && RUN.agent_id) || RUN_AGENT || null;
+  return rungs.map((a) =>
+    `<div class="rung${a.id === liveId ? " here" : ""}" data-agent="${escapeHtml(a.id)}">` +
+    `<span class="ln">${a.level}</span>` +
+    `<span class="nm">${escapeHtml(a.label)}<small>${escapeHtml(a.arrangement)}</small></span>` +
+    `<span class="why">${escapeHtml(a.tagline)}</span></div>`).join("");
 }
 
 function renderXray(nodeId) {
@@ -1141,11 +1186,9 @@ function renderXray(nodeId) {
   const panel = $("#xrayPanel");
   const fw = (spec.framework || []).map((f) =>
     `<span class="a">${escapeHtml(f.api)}</span><span class="n">${escapeHtml(f.note)}</span>`).join("");
-  const fwCard = fw ? `<div class="xcard"><h4>the LangGraph surface this graph exercises</h4><div class="fw">${fw}</div></div>` : "";
+  const fwCard = fw ? `<div class="xcard"><div class="fw">${fw}</div></div>` : "";
   const node = (spec.nodes || []).find((n) => n.id === nodeId);
   if (!node || !node.xray) {
-    // No node picked: the ladder is the front door of the x-ray, then this
-    // graph's framework surface. Clicking any DAG node swaps in its story.
     panel.innerHTML = ladderHtml() + fwCard;
     panel.querySelectorAll(".rung").forEach((r) =>
       r.addEventListener("click", () => userSelect(r.dataset.agent)));
@@ -1154,10 +1197,8 @@ function renderXray(nodeId) {
   const x = node.xray;
   panel.innerHTML =
     `<div class="xcard"><h3>${escapeHtml(node.label)} <span style="color:var(--dim);font-weight:400">· ${escapeHtml(node.role || "")}</span></h3>` +
-    `<h4>the concept</h4><p>${escapeHtml(x.concept || "")}</p>` +
-    `<h4>in this graph</h4><p>${escapeHtml(x.here || "")}</p>` +
-    `<h4>the trade</h4><p>${escapeHtml(x.tradeoffs || "")}</p>` +
-    (x.questions?.length ? `<h4>hard questions</h4>` + x.questions.map((q) => `<li>${escapeHtml(q)}</li>`).join("") : "") +
+    `<p>${escapeHtml(x.gotcha || "")}</p>` +
+    (x.q || []).map((q) => `<li>${escapeHtml(q)}</li>`).join("") +
     `</div>` + fwCard;
 }
 
@@ -1211,8 +1252,8 @@ function renderBlueprint(bp) {
     `<div class="edge-row"><b>${escapeHtml(e.from)}</b> &rarr; <b>${escapeHtml(e.to)}</b>` +
     (e.conditional ? ` <span class="cond">conditional</span>` : "") + `</div>`).join("");
   const topo = edges
-    ? `<div class="bp-topo"><h4>what LangGraph compiled · from get_graph(), so it cannot lie</h4>${edges}</div>`
-    : `<div class="bp-topo"><h4>what LangGraph compiled</h4><div class="edge-row">not compiled in this mode; the wiring below is still the real source</div></div>`;
+    ? `<div class="bp-topo"><h4>compiled edges · get_graph()</h4>${edges}</div>`
+    : `<div class="bp-topo"><h4>compiled edges</h4><div class="edge-row">needs a model key to compile</div></div>`;
 
   const srcLines = (bp.source || "").split("\n");
   const src = srcLines.map((line) =>
@@ -1221,8 +1262,8 @@ function renderBlueprint(bp) {
   // source is a few honest lines; say so instead of over-promising wiring.
   const prebuilt = srcLines.length < 9 && (bp.source || "").includes("create_agent");
   const srcTitle = prebuilt
-    ? "build(): short on purpose · create_agent IS the wiring, the prebuilt tool loop compiled into the topology above"
-    : "build(): the function that wires this graph · read straight off the module";
+    ? "build() · create_agent IS the wiring"
+    : "build() · the wiring, read off the module";
 
   panel.innerHTML = meta +
     `<div class="bp-cols">${topo}` +

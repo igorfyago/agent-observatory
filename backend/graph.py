@@ -48,105 +48,37 @@ GRAPH_SPEC = {
         {
             "id": "supervisor", "label": "Supervisor", "role": "plans & delegates",
             "xray": {
-                "concept": (
-                    "A planning node that writes the approach before any "
-                    "specialist spends tokens. It is a plain LangGraph node: a "
-                    "function that reads state and returns the piece it owns."),
-                "here": (
-                    "Writes `plan` into shared state. The two edges leaving it "
-                    "are both static add_edge calls, which is LangGraph's cue "
-                    "to run both targets in the same superstep, in parallel."),
-                "tradeoffs": (
-                    "A dedicated planner costs one extra model call per run. "
-                    "The alternative, letting each specialist improvise, saves "
-                    "that call but the specialists drift apart on hard "
-                    "questions."),
-                "questions": [
-                    "Why not let the model choose the team dynamically? Because this team is fixed, static edges are honest: the topology IS the org chart, and the picture cannot lie.",
-                    "What happens if the plan is bad? The critic gate catches the damage downstream and the revise loop pays the cost back, one bounded pass at a time.",
-                    "Where does parallelism come from? Two add_edge calls from one node: LangGraph runs all targets of a superstep together, no threads or queues in my code.",
-                ],
+                "gotcha": "Two add_edge calls out of one node = both targets run in the same superstep. Parallelism is topology, not threads.",
+                "q": ["Bad plan? The critic gate downstream bounces the damage back, max twice."],
             },
         },
         {
             "id": "researcher", "label": "Researcher", "role": "gathers facts",
             "xray": {
-                "concept": (
-                    "One of two specialists running concurrently in the same "
-                    "superstep. Each writes a different state key, so no "
-                    "reducer is needed and the writes cannot collide."),
-                "here": (
-                    "Streams its findings token by token (astream_events "
-                    "surfaces on_chat_model_stream) and returns `research`."),
-                "tradeoffs": (
-                    "Parallel specialists halve wall-clock latency but you "
-                    "give up any chance for the analyst to react to the "
-                    "research. This pair is independent by design, so the "
-                    "trade costs nothing here."),
-                "questions": [
-                    "How do parallel writes not clobber each other? Each branch owns a distinct key. Two writers on ONE key would need a reducer, like the analyst agent's analyses list.",
-                    "Why does the browser see tokens live? The runner listens to astream_events v2 and forwards every on_chat_model_stream chunk as an SSE frame.",
-                ],
+                "gotcha": "Runs concurrently with the analyst. Each writes its own state key, so no reducer needed, no collisions possible.",
+                "q": ["Two writers on ONE key? Then you need a reducer. See the analyst agent's analyses list."],
             },
         },
         {
             "id": "analyst", "label": "Analyst", "role": "weighs trade-offs",
             "xray": {
-                "concept": (
-                    "The second parallel specialist. Same superstep as the "
-                    "researcher, different state key, different system prompt."),
-                "here": "Returns `analysis`: the option space with a verdict.",
-                "tradeoffs": (
-                    "Splitting research from judgment is one more prompt to "
-                    "maintain, but each stays short and testable, and the "
-                    "writer gets two clean inputs instead of one muddled one."),
-                "questions": [
-                    "Is two specialists overkill for easy questions? Sometimes yes: that is exactly the case the Brief agent exists for, one call, no graph ceremony.",
-                ],
+                "gotcha": "Same superstep as the researcher, different key, different prompt. Judgment split from fact-finding on purpose.",
+                "q": [],
             },
         },
         {
             "id": "writer", "label": "Writer", "role": "drafts answer",
             "xray": {
-                "concept": (
-                    "A join. LangGraph will not start this node until every "
-                    "incoming branch of the superstep has finished, which is "
-                    "the framework giving you a barrier for free."),
-                "here": (
-                    "Merges `research` and `analysis` into `draft`, and counts "
-                    "`revisions` so the critic loop stays bounded. On a revise "
-                    "pass it rewrites against the critique instead."),
-                "tradeoffs": (
-                    "A single writer keeps one voice in the answer. The cost "
-                    "is a second full pass whenever the critic bounces it, "
-                    "which is why revisions are capped."),
-                "questions": [
-                    "How does the join know to wait? Both researcher and analyst have add_edge into writer, so LangGraph only schedules writer when both upstream writes have landed.",
-                    "Why does the writer count revisions instead of the critic? The writer owns the draft lifecycle; the critic stays a pure judge, which keeps the gate honest.",
-                ],
+                "gotcha": "A join: LangGraph will not start it until both branches land. The barrier is free, it is just two edges in.",
+                "q": ["Who counts revisions? The writer, so the critic stays a pure judge."],
             },
         },
         {
             "id": "critic", "label": "Critic", "role": "reviews & gates",
             "xray": {
-                "concept": (
-                    "A quality gate on a conditional edge: "
-                    "add_conditional_edges reads the critic's verdict from "
-                    "state and routes to END or back to the writer. The loop "
-                    "in the picture is real control flow, not an illustration."),
-                "here": (
-                    "Sets `approved`, and the router sends `revise` back to "
-                    "the writer at most twice, then forces approval so the "
-                    "graph provably terminates."),
-                "tradeoffs": (
-                    "A critic that can reject work doubles the cost of a bad "
-                    "draft. The bound keeps the worst case priced in: three "
-                    "writer passes, never an unbounded argument."),
-                "questions": [
-                    "What stops an infinite revise loop? A hard cap on revisions checked in the routing function: past two passes the route is END no matter what the critic says.",
-                    "Why a conditional edge instead of the critic calling the writer directly? The route decision lives in the topology, so it is visible, testable and drawn in the DAG from the compiled graph.",
-                    "Could the critic be a cheaper model? Yes, judging is easier than writing, and a mixed-model team is one line per node with init_chat_model.",
-                ],
+                "gotcha": "add_conditional_edges routes approve to END, revise back to the writer. The loop in the picture is real control flow.",
+                "q": ["Infinite loop? The router forces END after 2 revisions, no matter the verdict.",
+                      "Cheaper critic model? One line with init_chat_model: judging is easier than writing."],
             },
         },
     ],
@@ -172,18 +104,11 @@ GRAPH_SPEC = {
     ],
     # The LangGraph surface this graph actually exercises.
     "framework": [
-        {"api": "StateGraph(PipelineState)",
-         "note": "typed shared state; every node returns only the keys it owns"},
-        {"api": "add_edge fan-out + join",
-         "note": "two edges out of supervisor run in one superstep; writer waits for both"},
-        {"api": "add_conditional_edges(critic, ...)",
-         "note": "the approve/revise gate lives in the topology, not in a prompt"},
-        {"api": "adispatch_custom_event('obs', ...)",
-         "note": "demo tokens and route decisions ride the same event stream as real ones"},
-        {"api": "astream_events v2",
-         "note": "one listener turns node, token and custom events into the SSE frames you are watching"},
-        {"api": "InMemorySaver checkpointer",
-         "note": "every superstep is saved, which is what the checkpoint strip and re-run buttons use"},
+        {"api": "StateGraph(PipelineState)", "note": "typed shared state"},
+        {"api": "add_edge fan-out + join", "note": "parallel superstep, free barrier"},
+        {"api": "add_conditional_edges", "note": "approve/revise gate in topology"},
+        {"api": "astream_events v2", "note": "one listener feeds the whole UI"},
+        {"api": "InMemorySaver", "note": "checkpoint per superstep"},
     ],
 }
 
@@ -325,8 +250,8 @@ async def researcher(state: PipelineState, config) -> PipelineState:
     emit = _emit_of(config)
     prompt = (
         "You are the Researcher. List the key concrete facts (with confidence "
-        "levels) needed to answer the question. At most two short paragraphs "
-        f"or 5 tight bullets. Question: {state['question']}\nPlan: {state.get('plan', '')}"
+        "levels) needed to answer the question. One short paragraph or 4 "
+        f"tight bullets. Question: {state['question']}\nPlan: {state.get('plan', '')}"
     )
     research = await speak("researcher", prompt, "researcher", emit)
     return {"research": research}
@@ -336,7 +261,7 @@ async def analyst(state: PipelineState, config) -> PipelineState:
     emit = _emit_of(config)
     prompt = (
         "You are the Analyst. Weigh the trade-offs and give a verdict with "
-        "confidence, in at most two short paragraphs. "
+        "confidence, in one short paragraph. "
         f"Question: {state['question']}\nPlan: {state.get('plan', '')}"
     )
     analysis = await speak("analyst", prompt, "analyst", emit)
@@ -349,7 +274,7 @@ async def writer(state: PipelineState, config) -> PipelineState:
     if revisions == 0:
         prompt = (
             "You are the Writer. Merge the research and analysis into a concise "
-            "answer: two short paragraphs at most, recommendation first. "
+            "answer: one short paragraph, recommendation in the first sentence. "
             f"Question: {state['question']}\n\nResearch: {state.get('research', '')}"
             f"\n\nAnalysis: {state.get('analysis', '')}"
         )
@@ -357,7 +282,7 @@ async def writer(state: PipelineState, config) -> PipelineState:
     else:
         prompt = (
             "You are the Writer. Revise your draft per the Critic's feedback. "
-            "Keep it to two short paragraphs at most.\n\n"
+            "One short paragraph.\n\n"
             f"Draft: {state.get('draft', '')}\n\nCritique: {state.get('critique', '')}"
         )
         script = "writer-revision"

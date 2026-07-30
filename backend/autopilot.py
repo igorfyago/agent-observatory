@@ -35,45 +35,45 @@ import stage
 SCENARIOS = [
     {
         "agent": "brief", "level": 1,
-        "title": "one model call, typed output",
-        "shows": "with_structured_output forcing a Pydantic schema instead of free text",
+        "title": "typed output, one call",
+        "shows": "with_structured_output",
         "question": "Is SPY pinned by dealers into Friday opex?",
     },
     {
         "agent": "sql", "level": 2,
-        "title": "the tool loop repairs itself",
-        "shows": "a create_agent tool loop reading SQL errors and fixing its own query",
+        "title": "SQL self-repair loop",
+        "shows": "errors feed the next pass",
         "question": ("Which agent on this observatory had the highest error "
                      "rate over the last 7 days, and how does it compare to "
                      "the busiest agent? Show the SQL."),
     },
     {
         "agent": "repo", "level": 3,
-        "title": "the app explains its own source",
-        "shows": "retrieval as a tool the model calls at will, with file citations",
+        "title": "retrieval as a tool",
+        "shows": "cited from its own source",
         "question": ("Trace one token's journey from a LangGraph node to a lit "
                      "edge in the browser DAG. Name the files and functions on "
                      "the way."),
     },
     {
         "agent": "research", "level": 4,
-        "title": "a loop inside a loop",
-        "shows": "an inner tool loop nested in an outer reflection loop, both on conditional edges",
+        "title": "loop inside a loop",
+        "shows": "reflection wraps the tool cycle",
         "question": ("How busy has this observatory been in the last 24 hours "
                      "versus its 30-day average, and which agents drive the "
                      "difference? Numbers, not vibes."),
     },
     {
         "agent": "pipeline", "level": 5,
-        "title": "a parallel team with a critic gate",
-        "shows": "parallel fan-out, a join, and a critic loop on conditional edges",
+        "title": "fan-out + critic gate",
+        "shows": "parallel team, bounded revise loop",
         "question": ("Should a production agent team let a critic send work "
                      "back, or trust the first draft? Argue it concretely."),
     },
     {
         "agent": "analyst", "level": 6,
-        "title": "the flagship: router, specialists, gate, human",
-        "shows": "a Command router, three parallel sub-agents, a critic gate and interrupt()",
+        "title": "router, sub-agents, interrupt",
+        "shows": "the human gate pauses the graph",
         "question": "SPY",
     },
 ]

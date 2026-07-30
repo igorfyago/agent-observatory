@@ -37,48 +37,15 @@ SPEC = {
         {
             "id": "model", "label": "Model", "role": "asks and answers",
             "xray": {
-                "concept": (
-                    "Retrieval as a tool, not a fixed pipeline. The classic "
-                    "RAG chain retrieves once and answers; here the model "
-                    "holds the retriever and decides when to search, what to "
-                    "search for, and whether to search again."),
-                "here": (
-                    "Answers questions about this app's own source. The "
-                    "system prompt demands citations, so every claim carries "
-                    "a file path a reader can open."),
-                "tradeoffs": (
-                    "Model-driven retrieval costs an extra decision per "
-                    "search versus retrieve-then-answer, and earns it on "
-                    "multi-part questions where one search cannot cover the "
-                    "answer."),
-                "questions": [
-                    "Why not a plain retrieve-then-answer chain? One search per question is a guess made before reading anything; letting the model re-query after reading beats the guess.",
-                    "How do you know the citations are real? They name files in this repo, and the Repo agent's own answers are the first place a wrong path would get caught, publicly.",
-                    "What grounds the agent against inventing code? The prompt requires retrieved chunks before claims, and honesty when retrieval comes back empty.",
-                ],
+                "gotcha": "Retrieval is a tool the model calls, not a fixed retrieve-then-answer chain: it can re-search after reading.",
+                "q": ["Citations real? They name files in this repo, checkable one click away."],
             },
         },
         {
             "id": "tools", "label": "Retriever", "role": "semantic search",
             "xray": {
-                "concept": (
-                    "An embedding index over the repo's source, exposed as "
-                    "one @tool. Chunks come back tagged with their file "
-                    "path, which is what makes citations possible."),
-                "here": (
-                    "InMemoryVectorStore built lazily on first search: this "
-                    "repo is small enough that one embedding pass per boot "
-                    "beats carrying a vector database dependency."),
-                "tradeoffs": (
-                    "In-memory means re-embedding on restart and no index "
-                    "sharing. For a codebase this size that is minutes of "
-                    "cost a month; a real store earns its keep at real "
-                    "scale, and the swap is one line at the vectorstore "
-                    "seam."),
-                "questions": [
-                    "Why chunk on def and class boundaries? The splitter's separators keep functions whole, so a retrieved chunk is usually a readable unit, not a torn page.",
-                    "When does this design stop scaling? When the corpus outgrows one embedding pass per boot; then the same retriever interface moves to a persistent store without touching the agent.",
-                ],
+                "gotcha": "InMemoryVectorStore, embedded once per boot. Small corpus: no vector DB dependency earned yet.",
+                "q": ["Chunking? Split on def/class boundaries, so a chunk is a whole function, not a torn page."],
             },
         },
     ],
@@ -89,17 +56,13 @@ SPEC = {
     ],
     "state": [
         {"key": "messages", "kind": "append",
-         "note": "one message list with an add reducer: searches and chunks accumulate as turns"},
+         "note": "one list, add reducer: searches + chunks as turns"},
     ],
     "framework": [
-        {"api": "create_agent(model, tools)",
-         "note": "same prebuilt loop as the SQL agent; only the toolbelt differs"},
-        {"api": "InMemoryVectorStore + OpenAIEmbeddings",
-         "note": "langchain-core's built-in store: retrieval without a database dependency"},
-        {"api": "RecursiveCharacterTextSplitter",
-         "note": "code-aware chunking on def/class boundaries before embedding"},
-        {"api": "checkpointer=InMemorySaver()",
-         "note": "the search loop checkpoints per superstep like every other graph here"},
+        {"api": "create_agent(model, tools)", "note": "same loop as SQL, new toolbelt"},
+        {"api": "InMemoryVectorStore", "note": "retrieval, zero DB dependency"},
+        {"api": "RecursiveCharacterTextSplitter", "note": "def/class-aware chunks"},
+        {"api": "InMemorySaver", "note": "checkpoint per superstep"},
     ],
 }
 
@@ -187,8 +150,8 @@ Rules:
   answering, and again with new phrasings if the first results fall short.
 - Cite file paths for every claim, like (backend/runner.py).
 - Quote only the few key lines that carry the mechanism.
-- Keep the final answer to two short paragraphs at most, plus one small
-  code quote if it earns its place.
+- Keep the final answer to one short paragraph, plus one small code quote
+  if it earns its place.
 - If the code genuinely does not answer the question, say so. Never invent code."""
 
 TOOLS = [search_codebase]

@@ -270,9 +270,10 @@ async def replay(body: ReplayIn, request: Request):
 
 
 @app.get("/api/runs")
-def runs_list(limit: int = 30):
-    """Newest-first archive of everything that crossed the stage. All real."""
-    return {"runs": store.list_stage_runs(limit)}
+def runs_list(limit: int = 30, agent: str = ""):
+    """Newest-first archive of everything that crossed the stage. All real.
+    Pass agent= to get one agent's runs: tab clicks replay from here."""
+    return {"runs": store.list_stage_runs(limit, agent_id=agent or None)}
 
 
 @app.get("/api/runs/latest")

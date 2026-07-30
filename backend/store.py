@@ -260,15 +260,21 @@ def set_stage_trace(run_id: int, trace_url: str) -> None:
         conn.close()
 
 
-def list_stage_runs(limit: int = 30) -> list[dict]:
-    """Newest-first summaries, no frames: the list is light, a click loads one."""
+def list_stage_runs(limit: int = 30, agent_id: str | None = None) -> list[dict]:
+    """Newest-first summaries, no frames: the list is light, a click loads one.
+
+    agent_id narrows to one agent: that is how a tab click finds the run it
+    should replay for exactly the graph on screen.
+    """
     limit = max(1, min(int(limit), 200))
+    where = " WHERE agent_id = ?" if agent_id else ""
+    params: tuple = (agent_id, limit) if agent_id else (limit,)
     conn = get_connection()
     try:
         rows = conn.execute(
-            f"SELECT {', '.join(_STAGE_SUMMARY_COLS)} FROM stage_runs"
+            f"SELECT {', '.join(_STAGE_SUMMARY_COLS)} FROM stage_runs{where}"
             " ORDER BY id DESC LIMIT ?",
-            (limit,),
+            params,
         ).fetchall()
     finally:
         conn.close()

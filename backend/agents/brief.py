@@ -27,65 +27,30 @@ SPEC = {
         {
             "id": "context", "label": "Context", "role": "pulls desk data",
             "xray": {
-                "concept": (
-                    "A deterministic data node: no model, just an HTTP call "
-                    "to the trading desk when the question names a covered "
-                    "ticker. Keeping data fetch out of the model call makes "
-                    "the failure mode honest: no data means the state says so."),
-                "here": (
-                    "Writes `context` with the desk snapshot, or an empty "
-                    "string when the desk is offline or no ticker matched. "
-                    "The model is told what it does not have."),
-                "tradeoffs": (
-                    "A fixed fetch is cheaper and simpler than giving the "
-                    "model a fetch tool, but it cannot decide to pull more. "
-                    "For a one-shot brief that is the right trade; the "
-                    "Research agent makes the opposite one."),
-                "questions": [
-                    "Why is this a graph node at all? So the fetch is visible in the trace with its own timing, and so the picture shows where data enters the run.",
-                    "What if the desk is down? The context is empty, the prompt says data is unavailable, and the answer is expected to say so rather than invent numbers.",
-                ],
+                "gotcha": "No model here: a plain HTTP fetch as its own node, so data entry is visible in the trace with its own timing.",
+                "q": ["Desk down? Context stays empty and the prompt says so. No invented numbers."],
             },
         },
         {
             "id": "brief", "label": "Brief", "role": "structured answer",
             "quiet": True,
             "xray": {
-                "concept": (
-                    "Structured output: with_structured_output binds a "
-                    "Pydantic schema, so the model must return typed fields "
-                    "(tickers, intent, confidence), not prose that needs "
-                    "parsing."),
-                "here": (
-                    "One model call returning the Brief schema. The schema is "
-                    "the contract: downstream code reads fields, never "
-                    "regexes."),
-                "tradeoffs": (
-                    "A schema constrains style and can clip nuance, but it "
-                    "turns the model into a dependable API. Free text is for "
-                    "people; structures are for systems."),
-                "questions": [
-                    "How is the schema enforced? with_structured_output uses the provider's native structured mode, and Pydantic validates the result before the node returns.",
-                    "Why does confidence exist in the schema? A field the model must fill is a self-report you can chart and alert on; prose confidence disappears into text.",
-                    "When is one call the right architecture? When there is no tool to call and no loop to run: the simplest agent that can be correct should be the one deployed.",
-                ],
+                "gotcha": "with_structured_output forces a Pydantic schema: typed fields out, not prose to parse. The model becomes an API.",
+                "q": ["Why a confidence field? A forced field can be charted; confidence in prose disappears."],
             },
         },
     ],
     "edges": [{"from": "context", "to": "brief"}],
     "state": [
         {"key": "question", "kind": "overwrite", "note": "the input"},
-        {"key": "context",  "kind": "overwrite", "note": "desk data, or empty and honest"},
-        {"key": "brief",    "kind": "overwrite", "note": "the validated Pydantic dict"},
-        {"key": "answer",   "kind": "overwrite", "note": "the answer field, for the feed"},
+        {"key": "context",  "kind": "overwrite", "note": "desk data, or empty"},
+        {"key": "brief",    "kind": "overwrite", "note": "validated Pydantic dict"},
+        {"key": "answer",   "kind": "overwrite", "note": "the answer field"},
     ],
     "framework": [
-        {"api": "StateGraph, linear",
-         "note": "two nodes, one edge: the graph is small because the problem is"},
-        {"api": "with_structured_output(Brief)",
-         "note": "Pydantic schema out of the model, validated before the node returns"},
-        {"api": "InMemorySaver checkpointer",
-         "note": "even a two-node graph gets a checkpoint per superstep"},
+        {"api": "StateGraph, linear", "note": "two nodes, one edge"},
+        {"api": "with_structured_output(Brief)", "note": "typed answer, validated"},
+        {"api": "InMemorySaver", "note": "checkpoint per superstep"},
     ],
 }
 

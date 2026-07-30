@@ -29,7 +29,7 @@ def get_model(temperature: float = 0.0):
     return init_chat_model(
         os.getenv("OBS_MODEL", os.getenv("OPENAI_MODEL") or DEFAULT_MODEL),
         temperature=temperature,
-        max_tokens=int(os.getenv("OBS_MAX_OUTPUT_TOKENS", "450")),
+        max_tokens=int(os.getenv("OBS_MAX_OUTPUT_TOKENS", "300")),
     )
 
 
