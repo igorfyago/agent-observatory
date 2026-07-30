@@ -101,6 +101,65 @@ def graph_spec(agent: str = registry.DEFAULT_ID):
     return {"spec": a.spec, "mode": runner.mode()}
 
 
+@app.get("/api/blueprint")
+async def blueprint(agent: str = registry.DEFAULT_ID):
+    # async on purpose: a sync endpoint runs in a worker thread, and this is
+    # the one caller of Agent.build() that could race the runner's build on
+    # the event loop. On the loop, builds serialize and the cache stays sane.
+    """How this graph is actually configured: the build() source that wires
+    it, and the topology LangGraph itself reports after compiling.
+
+    The source is read off the module with inspect, so the page can never
+    show stale code; the compiled section comes from get_graph(), so the
+    picture provably matches what runs. This is the part a trace viewer
+    cannot show: traces are what happened, this is why it is wired to happen.
+    """
+    import inspect
+
+    a = registry.get(agent)
+    if a is None or a.kind != "text":
+        raise HTTPException(404, f"no text agent '{agent}'")
+
+    # Show the function that actually wires nodes and edges. The pipeline
+    # module keeps its wiring in build_graph() and exposes a thin build()
+    # for the registry contract; the wiring is what the page is for.
+    fn = getattr(a.module, "build_graph", None) or a.module.build
+    try:
+        source = inspect.getsource(fn)
+    except (OSError, TypeError):
+        source = "# source unavailable in this build"
+
+    compiled_desc: dict = {"nodes": [], "edges": []}
+    checkpointer = ""
+    try:
+        compiled = a.build()
+        g = compiled.get_graph()
+        compiled_desc = {
+            "nodes": sorted(g.nodes.keys()),
+            "edges": [{"from": e.source, "to": e.target,
+                       "conditional": bool(e.conditional)} for e in g.edges],
+        }
+        cp = getattr(compiled, "checkpointer", None)
+        checkpointer = type(cp).__name__ if cp else "none"
+    except Exception as exc:
+        # Demo mode cannot construct a model for most agents; the source is
+        # still the point, so say what happened instead of failing the panel.
+        checkpointer = f"not compiled here: {type(exc).__name__}"
+
+    return {
+        "agent": a.id,
+        "level": a.level,
+        "arrangement": a.arrangement,
+        "source": source,
+        "compiled": compiled_desc,
+        "checkpointer": checkpointer,
+        "runtime": {
+            "streaming": "astream_events v2, one listener for every agent",
+            "recursion_limit": 80,
+        },
+    }
+
+
 # ----------------------------------------------------------- the stage -----
 
 def _ip(request: Request) -> str:

@@ -185,6 +185,34 @@ def test_resume_with_nothing_pending_is_refused(obs):
     asyncio.run(scenario())
 
 
+def test_blueprint_serves_real_source_and_compiled_topology(obs):
+    """The blueprint is the x-ray onto how LangGraph is configured: the
+    build() source read off the module, and get_graph()'s own edge list."""
+    from fastapi.testclient import TestClient
+    import app as app_module
+
+    client = TestClient(app_module.app)
+    r = client.get("/api/blueprint", params={"agent": "pipeline"})
+    assert r.status_code == 200
+    bp = r.json()
+    assert "add_conditional_edges" in bp["source"]      # the real wiring code
+    assert bp["checkpointer"] == "InMemorySaver"
+    edges = {(e["from"], e["to"]) for e in bp["compiled"]["edges"]}
+    assert ("writer", "critic") in edges                # from get_graph()
+    assert any(e["conditional"] for e in bp["compiled"]["edges"])
+    assert bp["level"] == 5 and bp["arrangement"]
+
+    assert client.get("/api/blueprint", params={"agent": "riley"}).status_code == 404
+
+
+def test_ladder_order_is_simple_to_complex(obs):
+    import registry
+
+    levels = [a.level for a in registry.AGENTS if a.kind == "text"]
+    assert levels == sorted(levels) and levels[0] == 1  # the ladder ascends
+    assert all(a.arrangement for a in registry.AGENTS if a.kind == "text")
+
+
 def test_spend_refusal_backs_the_stage_off(obs, monkeypatch):
     monkeypatch.setenv("OBS_DAILY_USD", "0.00")   # the meter is already spent
 

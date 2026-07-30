@@ -22,7 +22,7 @@
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
-  body { background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, "Segoe UI", sans-serif; overflow: hidden; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, "Segoe UI", sans-serif; overflow: hidden; display: flex; flex-direction: column; }
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-thumb { background: #2a3140; border-radius: 999px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -30,7 +30,7 @@
 
   /* ---------- topbar: minibank chrome ---------- */
   .topbar {
-    display: flex; align-items: center; gap: 20px; padding: 14px 22px;
+    flex: none; display: flex; align-items: center; gap: 20px; padding: 14px 22px;
     border-bottom: 1px solid var(--line); background: transparent;
   }
   .brand { font-size: 17px; font-weight: 650; white-space: nowrap; }
@@ -59,11 +59,15 @@
   .chip a { color: inherit; text-decoration: none; }
 
   /* ---------- layout ---------- */
-  main { display: grid; grid-template-columns: minmax(360px, 42%) 1fr; height: calc(100% - 62px); }
+  /* The single row is pinned to the container height (minmax(0,1fr), never
+     auto), so a tall feed or a tall panel scrolls INSIDE its column instead
+     of growing the page past the viewport. main takes exactly the space the
+     topbar leaves, measured by flex, never by a hardcoded pixel guess. */
+  main { flex: 1 1 0; min-height: 0; display: grid; grid-template-columns: minmax(360px, 42%) 1fr; grid-template-rows: minmax(0, 1fr); }
 
   /* ---------- left: the feed ---------- */
   #chat { display: flex; flex-direction: column; border-right: 1px solid var(--line); min-width: 0; }
-  #messages { flex: 1; overflow-y: auto; padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 10px; }
+  #messages { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 10px; }
   .bubble {
     background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
     padding: 10px 12px; max-width: 94%; line-height: 1.55; font-size: 13px;
@@ -209,7 +213,7 @@
   }
   .subtab:hover { color: var(--text); }
   .subtab.active { color: var(--text); border-bottom-color: var(--accent); }
-  #panels { flex: 1; min-height: 140px; overflow-y: auto; }
+  #panels { flex: 1 1 140px; min-height: 0; overflow-y: auto; }
   .panel { display: none; }
   .panel.show { display: block; }
 
@@ -284,6 +288,113 @@
     font-family: var(--mono); font-size: 10.5px; color: var(--dim); flex-wrap: wrap;
   }
   #stats b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* tab level badge */
+  .tab-btn .lvl {
+    display: inline-block; min-width: 15px; height: 15px; line-height: 15px;
+    border-radius: 50%; background: var(--panel2); color: var(--dim);
+    font: 700 9.5px var(--mono); text-align: center; margin-right: 7px; vertical-align: 1px;
+  }
+  .tab-btn.active .lvl { background: rgba(255,255,255,.22); color: #fff; }
+
+  /* the complexity ladder (default x-ray view) */
+  .rung {
+    display: grid; grid-template-columns: 30px 120px 1fr; gap: 12px; align-items: center;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 14px; margin-bottom: 8px; cursor: pointer; transition: border-color .15s;
+    animation: rise .25s ease-out both;
+  }
+  .rung:nth-child(2) { animation-delay: .03s } .rung:nth-child(3) { animation-delay: .06s }
+  .rung:nth-child(4) { animation-delay: .09s } .rung:nth-child(5) { animation-delay: .12s }
+  .rung:nth-child(6) { animation-delay: .15s } .rung:nth-child(7) { animation-delay: .18s }
+  .rung:hover { border-color: var(--accent); }
+  .rung.here { border-color: var(--violet); }
+  .rung .ln {
+    width: 26px; height: 26px; border-radius: 50%; background: var(--panel2);
+    border: 1px solid var(--line); color: var(--text); font: 700 12px var(--mono);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .rung.here .ln { background: linear-gradient(135deg, var(--accent), var(--violet)); border: 0; color: #fff; }
+  .rung .nm { font-weight: 600; font-size: 13px; }
+  .rung .nm small { display: block; color: var(--dim); font: 10.5px var(--mono); margin-top: 2px; }
+  .rung .why { color: var(--dim); font-size: 12px; line-height: 1.45; }
+  .rung .why b { color: var(--text); font-weight: 600; }
+
+  /* blueprint: the build() source + what LangGraph compiled */
+  #bpPanel { padding: 12px 14px; }
+  .bp-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .bp-meta span {
+    border: 1px solid var(--line); background: var(--panel); border-radius: 999px;
+    padding: 3px 10px; font: 10.5px var(--mono); color: var(--dim);
+  }
+  .bp-meta span b { color: var(--text); font-weight: 600; }
+  .bp-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .bp-topo { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .bp-topo h4, .bp-srcwrap h4 {
+    font: 600 10px var(--mono); letter-spacing: .12em; text-transform: uppercase;
+    color: var(--dim); margin-bottom: 8px;
+  }
+  .bp-topo .edge-row { font: 11.5px var(--mono); color: var(--dim); padding: 2px 0; }
+  .bp-topo .edge-row b { color: var(--text); font-weight: 600; }
+  .bp-topo .edge-row .cond { color: var(--violet); }
+  .bp-srcwrap { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 4px 12px 14px; }
+  .bp-src { overflow: auto; max-height: 52vh; font: 11.5px var(--mono); line-height: 1.6; counter-reset: ln; }
+  .bp-src .cl { white-space: pre; display: block; }
+  .bp-src .cl::before {
+    counter-increment: ln; content: counter(ln);
+    display: inline-block; width: 30px; color: #3d4450; text-align: right; margin-right: 14px;
+  }
+  .tok-k { color: var(--violet); }
+  .tok-s { color: var(--green); }
+  .tok-c { color: #6a737d; font-style: italic; }
+  .tok-f { color: var(--amber); }
+  .tok-n { color: var(--accent); font-weight: 600; }
+
+  /* markdown in the feed. Bubbles are pre-wrap for plain text; rendered
+     markdown must opt back out or every block boundary doubles its gap. */
+  .bubble .md { display: block; white-space: normal; }
+  .bubble .md h1, .bubble .md h2, .bubble .md h3, .bubble .md h4 {
+    font-size: 13.5px; margin: 10px 0 4px; color: var(--text);
+  }
+  .bubble .md h1 { font-size: 14.5px; }
+  .bubble .md p { margin: 6px 0; }
+  .bubble .md code { font-family: var(--mono); font-size: 11.5px; background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+  .bubble .md pre.md-code {
+    background: #10151d; border: 1px solid var(--line); border-radius: 6px;
+    padding: 9px 11px; margin: 8px 0; overflow-x: auto;
+    font: 11.5px var(--mono); line-height: 1.55; white-space: pre;
+  }
+  .bubble .md pre.md-code code { background: none; border: 0; padding: 0; }
+  .bubble .md ul, .bubble .md ol { margin: 6px 0 6px 20px; }
+  .bubble .md li { margin: 3px 0; }
+  .bubble .md table.md-table { border-collapse: collapse; margin: 8px 0; font-size: 12px; }
+  .bubble .md .md-table th, .bubble .md .md-table td {
+    border: 1px solid var(--line); padding: 4px 9px; text-align: left;
+  }
+  .bubble .md .md-table th { background: var(--panel2); font-weight: 600; }
+  .bubble .md blockquote { border-left: 3px solid var(--line); padding-left: 10px; color: var(--dim); margin: 6px 0; }
+  .bubble .md hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+  .bubble .md a { color: var(--accent); }
+
+  /* the memo, as a document instead of raw JSON */
+  .memo { display: grid; grid-template-columns: 92px 1fr; gap: 4px 12px; margin-top: 4px; }
+  .memo .mk { font: 600 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); padding-top: 2px; }
+  .memo .mv { font-size: 12.5px; }
+  .memo .mv .lvl-pill {
+    display: inline-block; border: 1px solid rgba(188,140,255,.5); color: var(--violet);
+    border-radius: 999px; padding: 1px 9px; font: 600 11px var(--mono); margin-right: 6px;
+  }
+  .memo .mv li { margin-left: 16px; }
+
+  /* motion: numbers pop when they change, state rows flash when written */
+  @keyframes statpop { 0% { transform: scale(1); } 35% { transform: scale(1.18); color: var(--accent); } 100% { transform: scale(1); } }
+  #stats b.pop { display: inline-block; animation: statpop .5s ease-out; }
+  @keyframes rowflash { from { background: var(--accent-soft); } to { background: transparent; } }
+  .skey.flash { animation: rowflash 1.1s ease-out; }
+  .ckpt { animation: rise .2s ease-out both; }
+  @keyframes dotpop { 0% { r: 3.5; } 45% { r: 6; } 100% { r: 3.5; } }
+  .node.done .status { animation: dotpop .45s ease-out; }
+  #apDot:not(.idle) { animation: pulse 1.6s infinite; }
 
   /* desk lane + voice card (unchanged behavior) */
   #deskList { flex: 1; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
@@ -378,18 +489,21 @@
       <button class="subtab" data-panel="statePanel">state</button>
       <button class="subtab" data-panel="ckptPanel">checkpoints</button>
       <button class="subtab" data-panel="xrayPanel">x-ray</button>
+      <button class="subtab" data-panel="bpPanel">blueprint</button>
     </div>
     <div id="panels">
       <div class="panel show" id="tracePanel"><div id="trows"></div></div>
       <div class="panel" id="statePanel"></div>
       <div class="panel" id="ckptPanel"></div>
       <div class="panel" id="xrayPanel"></div>
+      <div class="panel" id="bpPanel"></div>
     </div>
     <div id="stats"></div>
   </section>
 </main>
 
 <script src="/layout.js"></script>
+<script src="/md.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 const messages = $("#messages"), trows = $("#trows");
@@ -418,7 +532,7 @@ function el(tag, cls, html) {
   if (html !== undefined) e.innerHTML = html;
   return e;
 }
-function escapeHtml(s) { return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+function escapeHtml(s) { return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
 function scrollChat() { messages.scrollTop = messages.scrollHeight; }
 function agentOf(id) { return AGENTS.find((a) => a.id === id); }
 function fmtUsd(v) { return "$" + (Number(v) || 0).toFixed(v >= 1 ? 2 : 4); }
@@ -431,8 +545,9 @@ async function init() {
   setMode(data.mode);
   const tabs = $("#tabs");
   for (const a of AGENTS) {
-    const b = el("button", "tab-btn", escapeHtml(a.label));
-    b.title = a.tagline;
+    const badge = a.level ? `<span class="lvl">${a.level}</span>` : "";
+    const b = el("button", "tab-btn", badge + escapeHtml(a.label));
+    b.title = a.arrangement ? `${a.arrangement} · ${a.tagline}` : a.tagline;
     b.dataset.id = a.id;
     b.addEventListener("click", () => userSelect(a.id));
     tabs.appendChild(b);
@@ -468,6 +583,7 @@ function renderView(id, keepRunState) {
   renderXray(null);
   renderStatePanel();
   renderCkpts();
+  loadBlueprint(id);
   if (keepRunState && id === RUN_AGENT) {
     doneNodes.forEach((n) => nodeEl(n)?.classList.add("done"));
     activeNodes.forEach((n) => nodeEl(n)?.classList.add("active"));
@@ -614,7 +730,20 @@ function onNodeStart(ev) {
 
 function onToken(ev) {
   const b = bubbles[ev.node];
-  if (b) { b.querySelector(".txt").textContent += ev.text; scrollChat(); }
+  if (b) {
+    // Markdown renders WHILE the model speaks, throttled so a token flood
+    // costs one re-render per beat, never one per token. A long researcher
+    // node must read formatted the whole way, not only after it finishes.
+    b._raw = (b._raw || "") + ev.text;
+    if (!b._mdTimer) {
+      b._mdTimer = setTimeout(() => {
+        b._mdTimer = null;
+        const t = b.querySelector(".txt");
+        if (t) { t.classList.add("md"); t.innerHTML = ObsMd.render(b._raw); }
+        scrollChat();
+      }, 140);
+    }
+  }
   const tr = traceRows[ev.node];
   if (tr) { tr.tokens++; tr.row.querySelector(".tok").textContent = tr.tokens + " tok"; }
 }
@@ -630,7 +759,14 @@ function onNodeEnd(ev) {
   if (b) {
     b.classList.remove("speaking");
     b.querySelector(".caret")?.remove();
-    if (!b.querySelector(".txt").textContent.trim()) b.remove();
+    if (b._mdTimer) { clearTimeout(b._mdTimer); b._mdTimer = null; }
+    const raw = (b._raw || "").trim();
+    if (!raw) b.remove();
+    else {
+      const t = b.querySelector(".txt");
+      t.classList.add("md");
+      t.innerHTML = ObsMd.render(raw);
+    }
   }
   const tr = traceRows[id];
   if (tr) {
@@ -642,17 +778,22 @@ function onNodeEnd(ev) {
   if (ev.update) {
     for (const [k, v] of Object.entries(ev.update)) stateVals[k] = { value: v, node: id };
     renderStatePanel();
+    for (const k of Object.keys(ev.update))
+      document.querySelector(`#statePanel .skey[data-key="${CSS.escape(k)}"]`)
+        ?.classList.add("flash");
   }
 }
 
 function onToolStart(ev) {
   nodeEl(ev.node)?.classList.add("tooling");
   const d = el("details", "tool running");
+  const args = ObsMd.pretty(ev.args ?? "");
   d.innerHTML =
     `<summary><span class="nm">${escapeHtml(ev.tool)}</span>` +
-    `<span class="arg">${escapeHtml(ev.args)}</span><span class="ms">...</span></summary>` +
-    `<div class="body"><span class="k">arguments</span><pre>${escapeHtml(ev.args)}</pre>` +
+    `<span class="arg">${escapeHtml(args)}</span><span class="ms">...</span></summary>` +
+    `<div class="body"><span class="k">arguments</span><pre></pre>` +
     `<span class="k">result</span><pre class="out">running...</pre></div>`;
+  d.querySelector(".body pre").textContent = args;
   trows.appendChild(d);
   tools[ev.id] = d;
   if ($("#tracePanel").classList.contains("show")) d.scrollIntoView({ block: "nearest" });
@@ -664,7 +805,7 @@ function onToolEnd(ev) {
   if (!d) return;
   d.classList.remove("running");
   d.querySelector(".ms").textContent = ev.ms == null ? "" : ev.ms + " ms";
-  d.querySelector(".out").textContent = ev.output ?? "";
+  d.querySelector(".out").textContent = ObsMd.pretty(ev.output ?? "");
 }
 
 function onRoute(ev) {
@@ -695,10 +836,42 @@ function onCheckpoints(ev) {
 function onInterrupt(ev) {
   showApprove(ev);
   const memo = ev.payload?.memo ?? ev.payload;
-  addBubble("approval gate · interrupt()", JSON.stringify(memo, null, 2), "answer");
+  const b = addBubble("approval gate · interrupt()", "", "answer");
+  b.appendChild(memoEl(memo));
+  scrollChat();
   setPill("idle");
   $("#stageTxt").innerHTML =
     `<span class="live">parked at the human gate</span>&nbsp; the graph is checkpointed and waiting`;
+}
+
+/* The memo as a document. Raw JSON braces are for machines; the whole point
+   of a typed schema is that the UI can lay the fields out like a memo. */
+function memoEl(memo) {
+  const wrap = el("div", "memo");
+  if (!memo || typeof memo !== "object") {
+    wrap.textContent = ObsMd.pretty(String(memo ?? ""));
+    return wrap;
+  }
+  const order = ["bias", "conviction", "thesis", "trade_idea", "key_levels",
+                 "invalidation", "risks"];
+  const keys = [...order.filter((k) => k in memo),
+                ...Object.keys(memo).filter((k) => !order.includes(k))];
+  for (const k of keys) {
+    const v = memo[k];
+    wrap.appendChild(el("div", "mk", escapeHtml(k.replace(/_/g, " "))));
+    const cell = el("div", "mv");
+    if (k === "conviction") {
+      cell.innerHTML = `<span class="lvl-pill">${escapeHtml(String(v))} / 10</span>`;
+    } else if (Array.isArray(v)) {
+      const ul = el("ul");
+      v.forEach((item) => ul.appendChild(el("li", "", escapeHtml(String(item)))));
+      cell.appendChild(ul);
+    } else {
+      cell.textContent = String(v ?? "");
+    }
+    wrap.appendChild(cell);
+  }
+  return wrap;
 }
 
 function showApprove(p) {
@@ -720,8 +893,12 @@ function showApprove(p) {
 
 function onRunEnd(ev) {
   document.getElementById("endcap")?.classList.add("done");
-  if (ev.note) addBubble("observatory", ev.note);
-  else addBubble("final answer", ev.answer || "(empty)", "answer");
+  if (ev.note) { addBubble("observatory", ev.note); return; }
+  const b = addBubble("final answer", "", "answer");
+  const body = el("div", "md");
+  body.innerHTML = ObsMd.render(ev.answer || "(empty)");
+  b.appendChild(body);
+  scrollChat();
 }
 
 function onTrace(ev) {
@@ -781,12 +958,13 @@ function renderRibbon() {
   now.classList.add("hide");
   dot.className = "dotp";
   if (!s.enabled) { dot.classList.add("idle"); txt.textContent = "autopilot off · the composer below is all yours"; return; }
+  const rung = s.level ? `level ${s.level} of ${s.ladder_top || 6} · ` : "";
   if (s.state === "countdown") {
     const left = Math.max(0, Math.ceil((s.next_at || 0) - Date.now() / 1000));
-    txt.innerHTML = `autopilot next: <b>${escapeHtml(s.title || "")}</b> on ${escapeHtml(s.agent || "")} in ${left}s · ${escapeHtml(s.shows || "")}`;
+    txt.innerHTML = `next: ${rung}<b>${escapeHtml(s.title || "")}</b> on ${escapeHtml(s.agent || "")} in ${left}s · ${escapeHtml(s.shows || "")}`;
     now.classList.remove("hide");
   } else if (s.state === "running") {
-    txt.innerHTML = `autopilot running <b>${escapeHtml(s.title || "")}</b> · ${escapeHtml(s.shows || "")}`;
+    txt.innerHTML = `running ${rung}<b>${escapeHtml(s.title || "")}</b> · ${escapeHtml(s.shows || "")}`;
   } else if (s.state === "resting") {
     txt.textContent = "autopilot resting: the spend guard asked for a pause";
   } else if (s.state === "empty_room") {
@@ -895,10 +1073,10 @@ function renderStatePanel() {
   panel.innerHTML = keys.map((k) => {
     const m = meta[k] || {};
     const v = stateVals[k];
-    return `<div class="skey"><span class="k">${escapeHtml(k)}</span>` +
+    return `<div class="skey" data-key="${escapeHtml(k)}"><span class="k">${escapeHtml(k)}</span>` +
       `<span class="r ${m.kind === "append" ? "append" : ""}">${escapeHtml(m.kind || "")}` +
       `<br><span class="wb">by ${escapeHtml(v.node)}</span></span>` +
-      `<span class="v">${escapeHtml(v.value)}</span></div>`;
+      `<span class="v">${escapeHtml(ObsMd.pretty(v.value))}</span></div>`;
   }).join("");
 }
 
@@ -945,6 +1123,19 @@ function wireNodeClicks() {
   });
 }
 
+function ladderHtml() {
+  const rungs = AGENTS.filter((a) => a.kind === "text" && a.level)
+    .sort((a, b) => a.level - b.level);
+  const liveId = RUN_AGENT || null;
+  return `<div class="xcard" style="margin-bottom:10px"><h3>the ladder</h3>` +
+    `<p>${rungs.length} arrangements, simplest first. The autopilot climbs one rung per run, so staying for a full cycle means watching agent architecture grow. Click a rung to read its graph.</p></div>` +
+    rungs.map((a) =>
+      `<div class="rung${a.id === liveId ? " here" : ""}" data-agent="${escapeHtml(a.id)}">` +
+      `<span class="ln">${a.level}</span>` +
+      `<span class="nm">${escapeHtml(a.label)}<small>${escapeHtml(a.arrangement)}</small></span>` +
+      `<span class="why">${escapeHtml(a.tagline)}</span></div>`).join("");
+}
+
 function renderXray(nodeId) {
   const spec = SPECS[VIEW] || {};
   const panel = $("#xrayPanel");
@@ -953,8 +1144,11 @@ function renderXray(nodeId) {
   const fwCard = fw ? `<div class="xcard"><h4>the LangGraph surface this graph exercises</h4><div class="fw">${fw}</div></div>` : "";
   const node = (spec.nodes || []).find((n) => n.id === nodeId);
   if (!node || !node.xray) {
-    panel.innerHTML =
-      `<div class="xcard"><h3>design x-ray</h3><p>click any node in the graph: each one opens the design defended in plain words, the trade it makes, and the questions it should be asked.</p></div>` + fwCard;
+    // No node picked: the ladder is the front door of the x-ray, then this
+    // graph's framework surface. Clicking any DAG node swaps in its story.
+    panel.innerHTML = ladderHtml() + fwCard;
+    panel.querySelectorAll(".rung").forEach((r) =>
+      r.addEventListener("click", () => userSelect(r.dataset.agent)));
     return;
   }
   const x = node.xray;
@@ -967,6 +1161,75 @@ function renderXray(nodeId) {
     `</div>` + fwCard;
 }
 
+/* ------------------------------------------------- blueprint: the wiring */
+const BP = {};                              // agent id -> fetched blueprint
+
+async function loadBlueprint(agentId) {
+  const a = agentOf(agentId);
+  if (!a || a.kind !== "text") return;
+  if (!BP[agentId]) {
+    try { BP[agentId] = await (await fetch("/api/blueprint?agent=" + agentId)).json(); }
+    catch { return; }
+  }
+  if (VIEW === agentId) renderBlueprint(BP[agentId]);
+}
+
+const PY_KEYWORDS = /\b(def|return|async|await|from|import|class|for|in|if|elif|else|not|and|or|None|True|False|lambda|with|try|except|finally|raise|yield|global|nonlocal)\b/g;
+const FRAMEWORK_NAMES = /\b(StateGraph|START|END|InMemorySaver|Command|interrupt|ToolNode|create_agent|add_node|add_edge|add_conditional_edges|compile|with_structured_output|bind_tools|checkpointer|ainvoke|astream_events)\b/g;
+
+/* Escape first, then colorize. Later passes only touch text OUTSIDE spans
+   already inserted, so string contents never get keyword colors and nothing
+   the model or the source says can smuggle markup in. */
+function outsideSpans(html, fn) {
+  return html.split(/(<span[^>]*>.*?<\/span>)/g)
+    .map((part) => part.startsWith("<span") ? part : fn(part)).join("");
+}
+
+function hiLine(line, nodeIds) {
+  let h = escapeHtml(line).replace(/"/g, "&quot;");
+  if (/^\s*#/.test(line)) return `<span class="tok-c">${h}</span>`;
+  h = h.replace(/(&quot;|&#39;|')((?:[^&']|&(?!quot;)|\\.)*?)\1/g, (m, q, inner) =>
+    `<span class="${nodeIds.has(inner) ? "tok-n" : "tok-s"}">${m}</span>`);
+  h = outsideSpans(h, (t) => t.replace(PY_KEYWORDS, '<span class="tok-k">$1</span>'));
+  h = outsideSpans(h, (t) => t.replace(FRAMEWORK_NAMES, '<span class="tok-f">$1</span>'));
+  return h;
+}
+
+function renderBlueprint(bp) {
+  const panel = $("#bpPanel");
+  if (!bp) { panel.innerHTML = `<div class="shint">no blueprint for this view</div>`; return; }
+  const nodeIds = new Set(((SPECS[bp.agent] || {}).nodes || []).map((n) => n.id));
+
+  const meta =
+    `<div class="bp-meta">` +
+    (bp.level ? `<span>rung <b>${bp.level}</b> · ${escapeHtml(bp.arrangement || "")}</span>` : "") +
+    `<span>checkpointer <b>${escapeHtml(bp.checkpointer || "none")}</b></span>` +
+    `<span>streaming <b>${escapeHtml(bp.runtime?.streaming || "")}</b></span>` +
+    `<span>recursion_limit <b>${bp.runtime?.recursion_limit ?? ""}</b></span></div>`;
+
+  const edges = (bp.compiled?.edges || []).map((e) =>
+    `<div class="edge-row"><b>${escapeHtml(e.from)}</b> &rarr; <b>${escapeHtml(e.to)}</b>` +
+    (e.conditional ? ` <span class="cond">conditional</span>` : "") + `</div>`).join("");
+  const topo = edges
+    ? `<div class="bp-topo"><h4>what LangGraph compiled · from get_graph(), so it cannot lie</h4>${edges}</div>`
+    : `<div class="bp-topo"><h4>what LangGraph compiled</h4><div class="edge-row">not compiled in this mode; the wiring below is still the real source</div></div>`;
+
+  const srcLines = (bp.source || "").split("\n");
+  const src = srcLines.map((line) =>
+    `<span class="cl">${hiLine(line, nodeIds) || " "}</span>`).join("");
+  // sql and repo declare their whole loop through create_agent, so their
+  // source is a few honest lines; say so instead of over-promising wiring.
+  const prebuilt = srcLines.length < 9 && (bp.source || "").includes("create_agent");
+  const srcTitle = prebuilt
+    ? "build(): short on purpose · create_agent IS the wiring, the prebuilt tool loop compiled into the topology above"
+    : "build(): the function that wires this graph · read straight off the module";
+
+  panel.innerHTML = meta +
+    `<div class="bp-cols">${topo}` +
+    `<div class="bp-srcwrap"><h4>${srcTitle}</h4>` +
+    `<div class="bp-src">${src}</div></div></div>`;
+}
+
 /* ------------------------------------------------------- stats + chips */
 function setMode(m) {
   const c = $("#chipLlm");
@@ -977,15 +1240,25 @@ function setMode(m) {
   if (!ls.querySelector("a")) ls.className = "chip" + (m.langsmith ? " on" : "");
 }
 
+let _lastStats = {};
 function renderStats(stats, spend) {
-  const s = $("#stats");
-  s.innerHTML =
-    `<span>runs today <b>${stats.runs_today}</b></span>` +
-    `<span>cost today <b>${fmtUsd(stats.cost_today_usd)}</b></span>` +
-    `<span>tool calls <b>${stats.tool_calls_today}</b></span>` +
-    `<span>tokens <b>${(stats.tokens_today || 0).toLocaleString()}</b></span>` +
-    `<span>median run <b>${stats.median_latency_ms} ms</b></span>` +
-    `<span>archived <b>${stats.runs_archived}</b></span>`;
+  const vals = {
+    runs: String(stats.runs_today),
+    cost: fmtUsd(stats.cost_today_usd),
+    calls: String(stats.tool_calls_today),
+    toks: (stats.tokens_today || 0).toLocaleString(),
+    med: stats.median_latency_ms + " ms",
+    arch: String(stats.runs_archived),
+  };
+  const labels = { runs: "runs today", cost: "cost today", calls: "tool calls",
+                   toks: "tokens", med: "median run", arch: "archived" };
+  $("#stats").innerHTML = Object.keys(vals).map((k) =>
+    `<span>${labels[k]} <b data-k="${k}">${vals[k]}</b></span>`).join("");
+  // Numbers that changed get one pop: the strip is alive, not restless.
+  for (const k of Object.keys(vals))
+    if (_lastStats[k] !== undefined && _lastStats[k] !== vals[k])
+      document.querySelector(`#stats b[data-k="${k}"]`)?.classList.add("pop");
+  _lastStats = vals;
   if (spend) {
     const chip = $("#chipSpend");
     chip.textContent = `${fmtUsd(spend.today_usd)} today`;

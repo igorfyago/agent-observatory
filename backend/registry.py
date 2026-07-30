@@ -10,8 +10,14 @@ API key and a broken agent cannot take the whole app down at boot.
 """
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from typing import Callable
+
+# One lock for all builds: compiling a graph is rare and fast, and a torn
+# check-then-set here once handed two InMemorySavers to the same agent,
+# stranding an interrupt's checkpoints in the copy that lost the race.
+_BUILD_LOCK = threading.Lock()
 
 import graph as pipeline
 from agents import analyst, brief, repo, research_graph, sql
@@ -28,6 +34,8 @@ class Agent:
     persona: str = ""              # voice agents: key into personas.PERSONAS
     placeholder: str = ""
     interactive: bool = False      # pauses for human approval mid-run
+    level: int = 0                 # rung on the complexity ladder, 1 = simplest
+    arrangement: str = ""          # the agent arrangement this rung demonstrates
     _cache: dict = field(default_factory=dict, compare=False)
 
     # -- text agent contract ------------------------------------------------
@@ -38,7 +46,9 @@ class Agent:
     def build(self):
         """Compile once, then reuse. Raises if no model key is configured."""
         if "graph" not in self._cache:
-            self._cache["graph"] = self.module.build()
+            with _BUILD_LOCK:
+                if "graph" not in self._cache:
+                    self._cache["graph"] = self.module.build()
         return self._cache["graph"]
 
     def make_input(self, question: str) -> dict:
@@ -48,15 +58,10 @@ class Agent:
         return self.module.extract(result)
 
 
+# Text agents are ordered as a complexity ladder, simplest arrangement first.
+# The tab bar, the ladder card and the autopilot's cycle all follow this order,
+# so a viewer meets the ideas the way they build on each other.
 AGENTS: list[Agent] = [
-    Agent(
-        id="pipeline",
-        label="Pipeline",
-        kind="text",
-        tagline="Five roles, a parallel fan-out and a critic that sends work back.",
-        module=pipeline,
-        placeholder="Should we build multi-agent systems as graphs or as prompt chains?",
-    ),
     Agent(
         id="brief",
         label="Brief",
@@ -64,6 +69,8 @@ AGENTS: list[Agent] = [
         tagline="One call, zero tools. Structured output instead of free text.",
         module=brief,
         placeholder="Is SPY pinned by dealers into Friday opex?",
+        level=1,
+        arrangement="one model call, typed output",
     ),
     Agent(
         id="sql",
@@ -72,6 +79,8 @@ AGENTS: list[Agent] = [
         tagline="Writes SQL, runs it, reads the error, fixes itself. The tool loop.",
         module=sql,
         placeholder="Which agent has the highest average latency, and how many runs did it have?",
+        level=2,
+        arrangement="the tool loop",
     ),
     Agent(
         id="repo",
@@ -80,6 +89,8 @@ AGENTS: list[Agent] = [
         tagline="RAG over this observatory's own source, with file citations.",
         module=repo,
         placeholder="How does the runner turn LangGraph events into DAG frames?",
+        level=3,
+        arrangement="retrieval as a tool",
     ),
     Agent(
         id="research",
@@ -88,6 +99,18 @@ AGENTS: list[Agent] = [
         tagline="A tool loop inside a reflection loop. Both are visible.",
         module=research_graph,
         placeholder="How busy has this observatory been over the last week?",
+        level=4,
+        arrangement="a loop inside a loop",
+    ),
+    Agent(
+        id="pipeline",
+        label="Pipeline",
+        kind="text",
+        tagline="Five roles, a parallel fan-out and a critic that sends work back.",
+        module=pipeline,
+        placeholder="Should we build multi-agent systems as graphs or as prompt chains?",
+        level=5,
+        arrangement="a parallel team with a critic gate",
     ),
     Agent(
         id="analyst",
@@ -97,6 +120,8 @@ AGENTS: list[Agent] = [
         module=analyst,
         placeholder="SPY",
         interactive=True,
+        level=6,
+        arrangement="router, parallel sub-agents, human gate",
     ),
     Agent(
         id="riley",
@@ -124,7 +149,7 @@ AGENTS: list[Agent] = [
 ]
 
 BY_ID: dict[str, Agent] = {a.id: a for a in AGENTS}
-DEFAULT_ID = "pipeline"
+DEFAULT_ID = "brief"          # the ladder starts on rung 1, so does the page
 
 
 def get(agent_id: str) -> Agent | None:
@@ -145,6 +170,8 @@ def as_json() -> list[dict]:
         if a.kind == "text":
             entry["spec"] = a.spec
             entry["placeholder"] = a.placeholder
+            entry["level"] = a.level
+            entry["arrangement"] = a.arrangement
         elif a.kind == "voice":
             p = personas.PERSONAS.get(a.persona, {})
             entry["voice"] = p.get("voice", "")

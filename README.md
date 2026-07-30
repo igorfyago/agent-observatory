@@ -48,6 +48,12 @@ mechanism, and says so on the ribbon while it runs:
 The SQL and research scenarios query the observatory's own run log, which the
 stage itself keeps appending to, so the questions stay fresh forever.
 
+The scenarios run in ladder order, simplest arrangement first: one model
+call with typed output, then the tool loop, then retrieval as a tool, then
+nested loops, then the parallel team, then the flagship. The tab bar carries
+the same rung numbers, and the x-ray tab opens on the ladder, so a viewer
+who stays for one cycle watches agent architecture grow a rung at a time.
+
 ## What the right rail proves
 
 - **trace**: every node with timing, every tool call with args, result and
@@ -62,6 +68,10 @@ stage itself keeps appending to, so the questions stay fresh forever.
 - **x-ray**: click any node for the design defended in plain words: the
   concept, the trade it makes, and the hard questions it should be asked.
   Every agent also lists the exact framework surface it exercises.
+- **blueprint**: the function that wires the graph, read straight off the
+  module with inspect so it can never go stale, with node names lit in the
+  source, next to the edge list LangGraph itself reports from get_graph().
+  Traces show what happened; the blueprint shows why it is wired to happen.
 
 Interrupts are part of the show: when the analyst parks at its human gate,
 autopilot runs approve themselves after a visible countdown, and any viewer

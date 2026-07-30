@@ -130,6 +130,10 @@ async def stream(agent: registry.Agent, question: str,
         checkpointer feature the checkpoint strip exists to show off.
     """
     node_ids = {n["id"] for n in agent.spec.get("nodes", [])}
+    # Nodes marked quiet produce structured output: their stream is JSON in
+    # flight, which belongs in the state inspector once merged, not in the
+    # feed as speech. Their tokens are swallowed; their cost still counts.
+    quiet_nodes = {n["id"] for n in agent.spec.get("nodes", []) if n.get("quiet")}
     thread = thread or uuid.uuid4().hex[:12]
     configurable = {"thread_id": thread}
     if checkpoint_id:
@@ -191,7 +195,7 @@ async def stream(agent: registry.Agent, question: str,
                 if isinstance(text, list):  # some providers chunk as blocks
                     text = "".join(
                         b.get("text", "") for b in text if isinstance(b, dict))
-                if text:
+                if text and node not in quiet_nodes:
                     yield {"type": "token", "node": node, "text": text}
 
             elif kind == "on_tool_start":

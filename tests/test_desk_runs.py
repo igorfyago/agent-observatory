@@ -185,4 +185,4 @@ def test_marcus_is_listed_without_breaking_the_other_agents(client):
     # text agents keep their spec, voice agents their tools: the picker's contract
     assert "spec" in by_id["pipeline"]
     assert "tools" in by_id["riley"]
-    assert data["default"] == "pipeline"
+    assert data["default"] == "brief"    # the ladder starts on rung 1

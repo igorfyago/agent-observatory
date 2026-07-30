@@ -263,16 +263,20 @@ DEMO_TOKEN_DELAY = 0.035  # seconds per word, tuned so the UI reads well
 # --------------------------------------------------------------------------- #
 
 async def _stream_llm(node: str, prompt: str, emit) -> str:
-    """Stream a real model's answer for this node, emitting token events."""
-    from langchain_openai import ChatOpenAI
+    """Stream a real model's answer for this node.
 
-    llm = ChatOpenAI(model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"), streaming=True)
+    No custom token events here: the runner already forwards every
+    on_chat_model_stream chunk, and emitting both painted every token twice
+    in live mode (found on screen: "the the first first draft draft").
+    Custom events stay a demo-mode tool, where there is no real stream.
+    """
+    from llm import get_model
+
     full = ""
-    async for chunk in llm.astream(prompt):
+    async for chunk in get_model().astream(prompt):
         text = chunk.content or ""
         if text:
             full += text
-            await emit({"type": "token", "node": node, "text": text})
     return full
 
 
@@ -321,7 +325,8 @@ async def researcher(state: PipelineState, config) -> PipelineState:
     emit = _emit_of(config)
     prompt = (
         "You are the Researcher. List the key concrete facts (with confidence "
-        f"levels) needed to answer: {state['question']}\nPlan: {state.get('plan', '')}"
+        "levels) needed to answer the question. At most two short paragraphs "
+        f"or 5 tight bullets. Question: {state['question']}\nPlan: {state.get('plan', '')}"
     )
     research = await speak("researcher", prompt, "researcher", emit)
     return {"research": research}
@@ -331,7 +336,8 @@ async def analyst(state: PipelineState, config) -> PipelineState:
     emit = _emit_of(config)
     prompt = (
         "You are the Analyst. Weigh the trade-offs and give a verdict with "
-        f"confidence for: {state['question']}\nPlan: {state.get('plan', '')}"
+        "confidence, in at most two short paragraphs. "
+        f"Question: {state['question']}\nPlan: {state.get('plan', '')}"
     )
     analysis = await speak("analyst", prompt, "analyst", emit)
     return {"analysis": analysis}
@@ -343,13 +349,15 @@ async def writer(state: PipelineState, config) -> PipelineState:
     if revisions == 0:
         prompt = (
             "You are the Writer. Merge the research and analysis into a concise "
-            f"answer to: {state['question']}\n\nResearch: {state.get('research', '')}"
+            "answer: two short paragraphs at most, recommendation first. "
+            f"Question: {state['question']}\n\nResearch: {state.get('research', '')}"
             f"\n\nAnalysis: {state.get('analysis', '')}"
         )
         script = "writer"
     else:
         prompt = (
-            "You are the Writer. Revise your draft per the Critic's feedback.\n\n"
+            "You are the Writer. Revise your draft per the Critic's feedback. "
+            "Keep it to two short paragraphs at most.\n\n"
             f"Draft: {state.get('draft', '')}\n\nCritique: {state.get('critique', '')}"
         )
         script = "writer-revision"

@@ -20,10 +20,16 @@ def have_key() -> bool:
 
 
 def get_model(temperature: float = 0.0):
-    """Chat model used by all text agents. Configured via OBS_MODEL env var."""
+    """Chat model used by all text agents. Configured via OBS_MODEL env var.
+
+    Every completion is capped: this is a public showcase, so answers are
+    meant to be read in one screen, and the cap is what makes "concise" a
+    property of the system instead of a hope about the prompt.
+    """
     return init_chat_model(
         os.getenv("OBS_MODEL", os.getenv("OPENAI_MODEL") or DEFAULT_MODEL),
         temperature=temperature,
+        max_tokens=int(os.getenv("OBS_MAX_OUTPUT_TOKENS", "450")),
     )
 
 

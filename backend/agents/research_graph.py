@@ -125,6 +125,7 @@ SPEC = {
         },
         {
             "id": "reflect", "label": "Reflect", "role": "judges sufficiency",
+            "quiet": True,
             "xray": {
                 "concept": (
                     "The outer loop's gate: a structured verdict "
@@ -333,7 +334,8 @@ def build():
         draft = (await model.ainvoke(state["messages"] + [
             HumanMessage("Write the research answer now: direct thesis first, then the "
                          "supporting numbers you gathered, then risks and caveats. "
-                         "Cite figures explicitly, no vague claims.")
+                         "Cite figures explicitly, no vague claims. Two short "
+                         "paragraphs at most.")
         ])).content
         return {"draft": draft}
 

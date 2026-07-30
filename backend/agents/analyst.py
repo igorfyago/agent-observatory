@@ -171,6 +171,7 @@ SPEC = {
         },
         {
             "id": "synthesize", "label": "Synthesize", "role": "head of desk",
+            "quiet": True,
             "xray": {
                 "concept": (
                     "The join and the decision point: waits for all three "
@@ -192,6 +193,7 @@ SPEC = {
         },
         {
             "id": "risk_review", "label": "Risk review", "role": "critic gate",
+            "quiet": True,
             "xray": {
                 "concept": (
                     "A machine critic ahead of the human: structured verdict, "
@@ -451,8 +453,8 @@ def build(checkpointer=None):
             system_prompt=(
                 f"You are the {name} specialist on an options desk. {focus} "
                 "Use your tools for any number you do not have. Be quantitative and "
-                "terse: 5-8 bullet points, every bullet backed by a figure. If the "
-                "playbook says live data is unavailable, say so instead of guessing."
+                "terse: 4-6 short bullet points, every bullet backed by a figure. If "
+                "the playbook says live data is unavailable, say so instead of guessing."
             ),
         )
 

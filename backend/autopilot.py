@@ -25,20 +25,22 @@ import time
 
 import stage
 
-# Each scenario names the LangGraph mechanism it exists to light up ("shows"),
-# and the UI repeats that line in the ribbon, so a viewer always knows what
-# they are looking at. Questions lean on the observatory's own live telemetry
-# and source where possible: real questions over real data, every cycle.
+# The playlist IS the complexity ladder: one rung per cycle position, from
+# the simplest arrangement that can be correct to the flagship, so a viewer
+# who stays for one full cycle has seen agent architecture grow step by step.
+# Each scenario names the LangGraph mechanism it lights up ("shows") and the
+# ribbon repeats it, so nobody has to guess what they are looking at.
+# Questions lean on the observatory's own live telemetry and source where
+# possible: real questions over real data, every cycle.
 SCENARIOS = [
     {
-        "agent": "pipeline",
-        "title": "five roles, one graph",
-        "shows": "parallel fan-out, a join, and a critic loop on conditional edges",
-        "question": ("Should a production agent team let a critic send work "
-                     "back, or trust the first draft? Argue it concretely."),
+        "agent": "brief", "level": 1,
+        "title": "one model call, typed output",
+        "shows": "with_structured_output forcing a Pydantic schema instead of free text",
+        "question": "Is SPY pinned by dealers into Friday opex?",
     },
     {
-        "agent": "sql",
+        "agent": "sql", "level": 2,
         "title": "the tool loop repairs itself",
         "shows": "a create_agent tool loop reading SQL errors and fixing its own query",
         "question": ("Which agent on this observatory had the highest error "
@@ -46,15 +48,7 @@ SCENARIOS = [
                      "the busiest agent? Show the SQL."),
     },
     {
-        "agent": "research",
-        "title": "a loop inside a loop",
-        "shows": "an inner tool loop nested in an outer reflection loop, both on conditional edges",
-        "question": ("How busy has this observatory been in the last 24 hours "
-                     "versus its 30-day average, and which agents drive the "
-                     "difference? Numbers, not vibes."),
-    },
-    {
-        "agent": "repo",
+        "agent": "repo", "level": 3,
         "title": "the app explains its own source",
         "shows": "retrieval as a tool the model calls at will, with file citations",
         "question": ("Trace one token's journey from a LangGraph node to a lit "
@@ -62,34 +56,29 @@ SCENARIOS = [
                      "the way."),
     },
     {
-        "agent": "pipeline",
-        "title": "five roles, one graph",
+        "agent": "research", "level": 4,
+        "title": "a loop inside a loop",
+        "shows": "an inner tool loop nested in an outer reflection loop, both on conditional edges",
+        "question": ("How busy has this observatory been in the last 24 hours "
+                     "versus its 30-day average, and which agents drive the "
+                     "difference? Numbers, not vibes."),
+    },
+    {
+        "agent": "pipeline", "level": 5,
+        "title": "a parallel team with a critic gate",
         "shows": "parallel fan-out, a join, and a critic loop on conditional edges",
-        "question": ("A team is torn between one strong agent with many tools "
-                     "and five narrow agents in a graph. What breaks first in "
-                     "each design as the task grows?"),
+        "question": ("Should a production agent team let a critic send work "
+                     "back, or trust the first draft? Argue it concretely."),
     },
     {
-        "agent": "brief",
-        "title": "structured output, no prose",
-        "shows": "with_structured_output forcing a Pydantic schema instead of free text",
-        "question": "Is SPY pinned by dealers into Friday opex?",
-    },
-    {
-        "agent": "sql",
-        "title": "the tool loop repairs itself",
-        "shows": "a create_agent tool loop reading SQL errors and fixing its own query",
-        "question": ("Break down this observatory's runs per agent per day for "
-                     "the last week. Which agent is getting more reliable and "
-                     "which is not? Show the SQL."),
-    },
-    {
-        "agent": "analyst",
+        "agent": "analyst", "level": 6,
         "title": "the flagship: router, specialists, gate, human",
         "shows": "a Command router, three parallel sub-agents, a critic gate and interrupt()",
         "question": "SPY",
     },
 ]
+
+LADDER_TOP = max(s["level"] for s in SCENARIOS)
 
 
 def enabled() -> bool:
@@ -189,7 +178,8 @@ async def loop() -> None:
 
             _announce("countdown", next_at=next_at,
                       title=scenario["title"], agent=scenario["agent"],
-                      shows=scenario["shows"], question=scenario["question"])
+                      shows=scenario["shows"], question=scenario["question"],
+                      level=scenario["level"], ladder_top=LADDER_TOP)
             while time.time() < next_at:
                 if stage.busy() or stage.viewers() == 0 and not performs_to_empty_room():
                     break               # room emptied or a visitor stepped up
@@ -204,7 +194,8 @@ async def loop() -> None:
             except stage.StageBusy:
                 continue                # a visitor beat us to it: their stage
             _announce("running", title=scenario["title"],
-                      agent=scenario["agent"], shows=scenario["shows"])
+                      agent=scenario["agent"], shows=scenario["shows"],
+                      level=scenario["level"], ladder_top=LADDER_TOP)
             await stage.wait_idle(timeout=stage.RUN_TIMEOUT_S + 30)
             await _handle_pending_approval()
 

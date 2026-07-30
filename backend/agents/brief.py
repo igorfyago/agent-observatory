@@ -49,6 +49,7 @@ SPEC = {
         },
         {
             "id": "brief", "label": "Brief", "role": "structured answer",
+            "quiet": True,
             "xray": {
                 "concept": (
                     "Structured output: with_structured_output binds a "
