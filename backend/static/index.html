@@ -44,10 +44,11 @@ html::before { content:""; position:fixed; top:0; left:0; right:0; height:48px;
   .topbar {
     flex: none; display: flex; align-items: center; gap: 20px; padding: 14px 22px;
     border-bottom: 1px solid var(--line); background: transparent;
+    height: 59px; box-sizing: border-box; /* estate subheader contract · clamped, its pill lane ran 2px tall */
   }
   .brand { font-size: 17px; font-weight: 650; white-space: nowrap; }
   .brand span { color: var(--accent); }
-  .tb-nav { display: flex; gap: 6px; margin-left: auto; overflow-x: auto; }
+  .tb-nav { display: flex; gap: 6px; margin-left: auto; overflow-x: auto; scrollbar-width: none; }
   .tab-btn {
     flex: none; background: none; border: 1px solid var(--line); border-radius: 999px;
     color: var(--dim); font: 600 13px system-ui; padding: 6px 16px; cursor: pointer;
