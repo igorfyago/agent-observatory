@@ -48,6 +48,20 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Agent Observatory", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def revalidate_frontend(request: Request, call_next):
+    """Browsers were caching the frontend on modification-time heuristics, so
+    a deploy could leave a visitor on a week-old page for another day, or on a
+    mixed one, old HTML with new script, which is worse. no-cache means store
+    but revalidate: StaticFiles answers 304 through its ETag, so the steady
+    cost is one conditional request per file and a page is never stale.
+    """
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 class ChatIn(BaseModel):
     question: str = ""
     agent: str = registry.DEFAULT_ID
